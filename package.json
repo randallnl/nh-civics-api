@@ -1,0 +1,17 @@
+{
+  "name": "nh-civics-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "dry-run": "wrangler deploy --dry-run",
+    "cf-typegen": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260609.0",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.90.0"
+  }
+}
