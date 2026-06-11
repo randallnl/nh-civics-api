@@ -1,6 +1,6 @@
 # NH Civics API
 
-Cloudflare Worker project for `nhdb-api`.
+Cloudflare Worker project for `nh-civics-api`.
 
 ## Local development
 
@@ -46,11 +46,11 @@ npx wrangler secret put ADMIN_SECRET
 
 1. Commit and push this repository to GitHub.
 2. In Cloudflare, open **Workers & Pages**.
-3. Select the existing Worker named **nhdb-api**.
+3. Select the existing Worker named **nh-civics-api**.
 4. Open **Settings** then **Builds**.
 5. Select **Connect** and choose this GitHub repository.
 6. Use `/` as the root directory.
 7. Use `npm install` as the build command if Cloudflare asks for one.
 8. Use `npm run deploy` as the deploy command.
 
-The Worker name in `wrangler.jsonc` must stay `nhdb-api` so it matches the existing Cloudflare Worker.
+The Worker name in `wrangler.jsonc` must stay `nh-civics-api` so it matches the existing Cloudflare Worker.
