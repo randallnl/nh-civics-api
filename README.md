@@ -1,6 +1,6 @@
 # NH Civics API
 
-Cloudflare Worker project for `nh-civics-api`.
+Cloudflare Worker project for `nh-civics-api`, served from `nhciviccommons.com`.
 
 ## Local development
 
@@ -31,6 +31,8 @@ npm run dry-run
 ## Required Cloudflare bindings
 
 The required Cloudflare resource bindings are configured in `wrangler.jsonc`.
+
+The Worker route is configured as a custom domain for `nhciviccommons.com`.
 
 - `DB`: D1 database binding used by the API queries.
 - `LEGISLATOR_PHOTOS`: R2 bucket binding used by `/admin/sync-legislator-photos`.
