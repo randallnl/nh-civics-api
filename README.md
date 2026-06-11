@@ -30,7 +30,7 @@ npm run dry-run
 
 ## Required Cloudflare bindings
 
-Update `wrangler.jsonc` before deploying. The D1 database name and R2 bucket name are set, but the D1 `database_id` still needs the real Cloudflare UUID.
+The required Cloudflare resource bindings are configured in `wrangler.jsonc`.
 
 - `DB`: D1 database binding used by the API queries.
 - `LEGISLATOR_PHOTOS`: R2 bucket binding used by `/admin/sync-legislator-photos`.
