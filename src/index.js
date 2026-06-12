@@ -482,9 +482,13 @@ async function handleCommunityCounty(request, env) {
 
   for (const district of districts) {
     for (const town of splitCommunityList(
-      district.communities_represented || district.towns_represented
+      district.towns_represented || district.communities_represented
     )) {
-      towns.add(town);
+      const townName = getCountyTownName(town);
+
+      if (townName) {
+        towns.add(townName);
+      }
     }
   }
 
@@ -839,6 +843,17 @@ function splitCommunityList(value) {
     .split(/[;,]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function getCountyTownName(value) {
+  const town = String(value || "")
+    .trim()
+    .replace(/^Mancheseter\b/i, "Manchester")
+    .replace(/\s+wards?\s+\d+.*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return /^\d+$/.test(town) ? "" : town;
 }
 
 function getCommunityArticleSearchTerms(district) {
