@@ -31,6 +31,7 @@ export default {
         status: "ok",
         endpoints: [
           "/tools",
+          "/communities",
           "/reps/search?town=Manchester",
           "/reps/lookup",
           "/reps/{employeeno}/votes",
@@ -72,6 +73,10 @@ export default {
           status: "planned",
         },
       ]);
+    }
+
+    if (url.pathname === "/communities") {
+      return handleCommunities(request, env);
     }
 
     if (url.pathname.startsWith("/reps/") && url.pathname.endsWith("/votes")) {
@@ -249,6 +254,307 @@ function buildGeneralCourtUrl(rep) {
   }
 
   return `https://www.gencourt.state.nh.us/house/members/member.aspx?pid=${rep.personid}`;
+}
+
+async function handleCommunities(request, env) {
+  const url = new URL(request.url);
+  const body = String(url.searchParams.get("body") || "all").toLowerCase();
+  const q = String(url.searchParams.get("q") || "").trim();
+  const limit = boundedNumber(url.searchParams.get("limit"), 50, 1, 50);
+  const offset = boundedNumber(url.searchParams.get("offset"), 0, 0, 10000);
+  const articleLimit = boundedNumber(
+    url.searchParams.get("articleLimit"),
+    3,
+    0,
+    10
+  );
+
+  const where = [`d.type IN ('house_district', 'senate_district')`];
+  const binds = [];
+
+  if (body === "house") {
+    where.push(`d.type = 'house_district'`);
+  } else if (body === "senate") {
+    where.push(`d.type = 'senate_district'`);
+  } else if (body !== "all") {
+    return json({ error: "body must be house, senate, or all." }, 400);
+  }
+
+  if (q) {
+    const search = `%${q}%`;
+    where.push(`
+      (
+        d.name LIKE ?
+        OR d.slug LIKE ?
+        OR COALESCE(d.county, '') LIKE ?
+        OR COALESCE(d.towns_represented, '') LIKE ?
+        OR COALESCE(dm.communities_represented, '') LIKE ?
+      )
+    `);
+    binds.push(search, search, search, search, search);
+  }
+
+  const districts = await env.DB.prepare(`
+    SELECT
+      d.id,
+      d.name,
+      d.slug,
+      d.type,
+      CASE
+        WHEN d.type = 'senate_district' THEN 'Senate'
+        WHEN d.type = 'house_district' THEN 'House'
+        ELSE d.type
+      END AS chamber,
+      CASE
+        WHEN d.type = 'senate_district' THEN 'S'
+        WHEN d.type = 'house_district' THEN 'H'
+        ELSE NULL
+      END AS body,
+      cc.source_county_id AS county_number,
+      d.county,
+      COALESCE(
+        d.district,
+        CAST(REPLACE(d.slug, 'nh-senate-district-', '') AS INTEGER)
+      ) AS district_number,
+      COALESCE(dm.district_label, d.name) AS district_label,
+      COALESCE(dm.communities_represented, d.towns_represented, '') AS communities_represented,
+      d.towns_represented,
+      d.floterial,
+      d.seats
+    FROM divisions d
+    LEFT JOIN county_codes cc
+      ON LOWER(cc.name) = LOWER(d.county)
+    LEFT JOIN d1_district_mapping dm
+      ON (
+        d.type = 'house_district'
+        AND dm.body = 'H'
+        AND dm.county = cc.source_county_id
+        AND dm.district = d.district
+      )
+      OR (
+        d.type = 'senate_district'
+        AND dm.body = 'S'
+        AND dm.district = CAST(REPLACE(d.slug, 'nh-senate-district-', '') AS INTEGER)
+      )
+    WHERE ${where.join(" AND ")}
+    ORDER BY
+      CASE d.type
+        WHEN 'senate_district' THEN 1
+        WHEN 'house_district' THEN 2
+        ELSE 3
+      END,
+      COALESCE(cc.source_county_id, 0),
+      district_number,
+      d.name
+    LIMIT ?
+    OFFSET ?
+  `)
+    .bind(...binds, limit, offset)
+    .all();
+
+  const communities = [];
+
+  for (const district of districts.results || []) {
+    const representatives = await getRepresentativesForDistrict(env, district);
+    const relatedArticles = await getArticlesForCommunityPreview(
+      env,
+      district,
+      representatives,
+      articleLimit
+    );
+
+    communities.push({
+      id: district.id,
+      slug: district.slug,
+      name: district.name,
+      chamber: district.chamber,
+      body: district.body,
+      county: district.county || null,
+      district: district.district_number,
+      label: district.district_label,
+      townsRepresented: splitCommunityList(
+        district.communities_represented || district.towns_represented
+      ),
+      floterial: parseBooleanText(district.floterial),
+      seats: district.seats || representatives.length || null,
+      representativeSummary: {
+        count: representatives.length,
+        names: representatives.map((rep) => rep.name),
+        parties: summarizeParties(representatives),
+      },
+      representatives,
+      relatedArticles,
+    });
+  }
+
+  return json({
+    communities,
+    meta: {
+      body,
+      q,
+      limit,
+      offset,
+      count: communities.length,
+      articleLimit,
+    },
+  });
+}
+
+async function getRepresentativesForDistrict(env, district) {
+  if (!district.body || !district.district_number) return [];
+
+  let sql = `
+    SELECT
+      l.personid AS id,
+      l.personid,
+      l.employeeno,
+      CASE l.legislativebody
+        WHEN 'S' THEN 'Senate'
+        WHEN 'H' THEN 'House'
+        ELSE l.legislativebody
+      END AS chamber,
+      l.firstname || ' ' || l.lastname AS name,
+      l.firstname,
+      l.lastname,
+      l.party,
+      COALESCE(p.photo_url, '') AS photo,
+      l.emailaddress AS email,
+      l.district AS raw_district,
+      l.countycode
+    FROM d1_legislators l
+    LEFT JOIN d1_legislator_photos p
+      ON p.employeeno = l.employeeno
+    WHERE l.active = 1
+      AND l.legislativebody = ?
+      AND CAST(l.district AS INTEGER) = ?
+  `;
+
+  const binds = [district.body, district.district_number];
+
+  if (district.body === "H") {
+    sql += ` AND CAST(l.countycode AS INTEGER) = ?`;
+    binds.push(district.county_number);
+  }
+
+  sql += ` ORDER BY l.lastname, l.firstname`;
+
+  const result = await env.DB.prepare(sql).bind(...binds).all();
+
+  return (result.results || []).map((rep) => ({
+    ...rep,
+    sourceUrls: {
+      generalCourt: buildGeneralCourtUrl(rep),
+      photo: rep.photo || null,
+    },
+  }));
+}
+
+async function getArticlesForCommunityPreview(
+  env,
+  district,
+  representatives,
+  limit
+) {
+  if (!limit) return [];
+
+  const towns = getCommunityArticleSearchTerms(district);
+  const personids = representatives.map((rep) => rep.personid).filter(Boolean);
+  const employeenos = representatives
+    .map((rep) => rep.employeeno)
+    .filter(Boolean);
+
+  const conditions = [];
+  const binds = [];
+
+  if (towns.length) {
+    conditions.push(
+      `LOWER(at.town) IN (${towns.map(() => "?").join(", ")})`
+    );
+    binds.push(...towns);
+  }
+
+  if (personids.length) {
+    conditions.push(
+      `al.personid IN (${personids.map(() => "?").join(", ")})`
+    );
+    binds.push(...personids);
+  }
+
+  if (employeenos.length) {
+    conditions.push(
+      `al.employeeno IN (${employeenos.map(() => "?").join(", ")})`
+    );
+    binds.push(...employeenos);
+  }
+
+  if (!conditions.length) return [];
+
+  const result = await env.DB.prepare(`
+    SELECT DISTINCT
+      a.article_id,
+      a.title,
+      a.resource_type,
+      a.publisher,
+      a.url,
+      a.summary,
+      a.created_at,
+      a.updated_at
+    FROM d1_articles a
+    LEFT JOIN d1_article_towns at
+      ON at.article_id = a.article_id
+    LEFT JOIN d1_article_legislators al
+      ON al.article_id = a.article_id
+    WHERE ${conditions.map((condition) => `(${condition})`).join(" OR ")}
+    ORDER BY a.created_at DESC, a.title
+    LIMIT ?
+  `)
+    .bind(...binds, limit)
+    .all();
+
+  return result.results || [];
+}
+
+function splitCommunityList(value) {
+  return String(value || "")
+    .split(/[;,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getCommunityArticleSearchTerms(district) {
+  const terms = new Set();
+
+  for (const town of splitCommunityList(
+    district.communities_represented || district.towns_represented
+  )) {
+    const normalized = normalizeCommunityText(town);
+    if (!normalized) continue;
+
+    terms.add(normalized);
+    terms.add(normalized.replace(/\s+ward\s+\d+$/i, "").trim());
+    terms.add(normalized.replace(/\s+wards?\s+\d+.*$/i, "").trim());
+  }
+
+  return [...terms].filter(Boolean).slice(0, 50);
+}
+
+function parseBooleanText(value) {
+  if (value === null || value === undefined || value === "") return null;
+  return String(value).toLowerCase() === "true";
+}
+
+function summarizeParties(representatives) {
+  return representatives.reduce((summary, rep) => {
+    const party = rep.party || "Unknown";
+    summary[party] = (summary[party] || 0) + 1;
+    return summary;
+  }, {});
+}
+
+function boundedNumber(value, fallback, min, max) {
+  const number = Number(value ?? fallback);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(Math.max(number, min), max);
 }
 
 async function getArticlesForLegislator(env, personid, employeeno, limit = 10) {

@@ -28,6 +28,15 @@ Run a deploy dry run:
 npm run dry-run
 ```
 
+## Endpoints
+
+- `GET /communities`: lists New Hampshire House and Senate districts with representatives, towns represented, and related article previews.
+  - `body=house|senate|all`
+  - `q=<search>`
+  - `limit=<1-50>`
+  - `offset=<number>`
+  - `articleLimit=<0-10>`
+
 ## Required Cloudflare bindings
 
 The required Cloudflare resource bindings are configured in `wrangler.jsonc`.
