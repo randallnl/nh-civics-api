@@ -36,6 +36,8 @@ npm run dry-run
   - `limit=<1-50>`
   - `offset=<number>`
   - `articleLimit=<0-10>`
+- `GET /communities/house/{county}/{district}`: returns one House district with representatives, towns represented, and related articles.
+- `GET /communities/senate/{district}`: returns one Senate district with representatives, towns represented, and related articles.
 
 ## Required Cloudflare bindings
 

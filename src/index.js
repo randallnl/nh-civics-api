@@ -32,6 +32,8 @@ export default {
         endpoints: [
           "/tools",
           "/communities",
+          "/communities/house/{county}/{district}",
+          "/communities/senate/{district}",
           "/reps/search?town=Manchester",
           "/reps/lookup",
           "/reps/{employeeno}/votes",
@@ -77,6 +79,10 @@ export default {
 
     if (url.pathname === "/communities") {
       return handleCommunities(request, env);
+    }
+
+    if (url.pathname.startsWith("/communities/")) {
+      return handleCommunityDetail(request, env);
     }
 
     if (url.pathname.startsWith("/reps/") && url.pathname.endsWith("/votes")) {
@@ -355,36 +361,9 @@ async function handleCommunities(request, env) {
   const communities = [];
 
   for (const district of districts.results || []) {
-    const representatives = await getRepresentativesForDistrict(env, district);
-    const relatedArticles = await getArticlesForCommunityPreview(
-      env,
-      district,
-      representatives,
-      articleLimit
+    communities.push(
+      await buildCommunityResponse(env, district, articleLimit)
     );
-
-    communities.push({
-      id: district.id,
-      slug: district.slug,
-      name: district.name,
-      chamber: district.chamber,
-      body: district.body,
-      county: district.county || null,
-      district: district.district_number,
-      label: district.district_label,
-      townsRepresented: splitCommunityList(
-        district.communities_represented || district.towns_represented
-      ),
-      floterial: parseBooleanText(district.floterial),
-      seats: district.seats || representatives.length || null,
-      representativeSummary: {
-        count: representatives.length,
-        names: representatives.map((rep) => rep.name),
-        parties: summarizeParties(representatives),
-      },
-      representatives,
-      relatedArticles,
-    });
   }
 
   return json({
@@ -398,6 +377,185 @@ async function handleCommunities(request, env) {
       articleLimit,
     },
   });
+}
+
+async function handleCommunityDetail(request, env) {
+  const url = new URL(request.url);
+  const parts = url.pathname.split("/").filter(Boolean);
+  const kind = String(parts[1] || "").toLowerCase();
+  const articleLimit = boundedNumber(
+    url.searchParams.get("articleLimit"),
+    10,
+    0,
+    50
+  );
+
+  let district;
+
+  if (kind === "senate") {
+    const districtNumber = Number(parts[2]);
+
+    if (!Number.isInteger(districtNumber) || districtNumber < 1) {
+      return json(
+        { error: "Use /communities/senate/{district}." },
+        400
+      );
+    }
+
+    district = await getCommunityDistrict(env, {
+      body: "S",
+      districtNumber,
+    });
+  } else if (kind === "house") {
+    const county = decodeURIComponent(parts[2] || "");
+    const districtNumber = Number(parts[3]);
+
+    if (!county || !Number.isInteger(districtNumber) || districtNumber < 1) {
+      return json(
+        { error: "Use /communities/house/{county}/{district}." },
+        400
+      );
+    }
+
+    district = await getCommunityDistrict(env, {
+      body: "H",
+      county,
+      districtNumber,
+    });
+  } else {
+    return json(
+      {
+        error:
+          "Unknown community type. Use /communities/house/{county}/{district} or /communities/senate/{district}.",
+      },
+      404
+    );
+  }
+
+  if (!district) {
+    return json({ error: "Community district not found." }, 404);
+  }
+
+  return json({
+    community: await buildCommunityResponse(env, district, articleLimit),
+    meta: {
+      articleLimit,
+    },
+  });
+}
+
+async function getCommunityDistrict(env, { body, county, districtNumber }) {
+  const where = [];
+  const binds = [];
+
+  if (body === "S") {
+    where.push(`d.type = 'senate_district'`);
+    where.push(
+      `CAST(REPLACE(d.slug, 'nh-senate-district-', '') AS INTEGER) = ?`
+    );
+    binds.push(districtNumber);
+  } else {
+    const normalizedCounty = normalizeCommunityPathPart(county);
+    const numericCounty = Number(normalizedCounty);
+    where.push(`d.type = 'house_district'`);
+    where.push(`d.district = ?`);
+    where.push(`
+      (
+        LOWER(d.county) = ?
+        OR LOWER(REPLACE(d.county, ' ', '-')) = ?
+        OR cc.code = ?
+        OR cc.source_county_id = ?
+      )
+    `);
+    binds.push(
+      districtNumber,
+      normalizedCounty.replace(/-/g, " "),
+      normalizedCounty,
+      normalizedCounty.padStart(2, "0"),
+      Number.isFinite(numericCounty) ? numericCounty : -1
+    );
+  }
+
+  return env.DB.prepare(`
+    SELECT
+      d.id,
+      d.name,
+      d.slug,
+      d.type,
+      CASE
+        WHEN d.type = 'senate_district' THEN 'Senate'
+        WHEN d.type = 'house_district' THEN 'House'
+        ELSE d.type
+      END AS chamber,
+      CASE
+        WHEN d.type = 'senate_district' THEN 'S'
+        WHEN d.type = 'house_district' THEN 'H'
+        ELSE NULL
+      END AS body,
+      cc.source_county_id AS county_number,
+      d.county,
+      COALESCE(
+        d.district,
+        CAST(REPLACE(d.slug, 'nh-senate-district-', '') AS INTEGER)
+      ) AS district_number,
+      COALESCE(dm.district_label, d.name) AS district_label,
+      COALESCE(dm.communities_represented, d.towns_represented, '') AS communities_represented,
+      d.towns_represented,
+      d.floterial,
+      d.seats
+    FROM divisions d
+    LEFT JOIN county_codes cc
+      ON LOWER(cc.name) = LOWER(d.county)
+    LEFT JOIN d1_district_mapping dm
+      ON (
+        d.type = 'house_district'
+        AND dm.body = 'H'
+        AND dm.county = cc.source_county_id
+        AND dm.district = d.district
+      )
+      OR (
+        d.type = 'senate_district'
+        AND dm.body = 'S'
+        AND dm.district = CAST(REPLACE(d.slug, 'nh-senate-district-', '') AS INTEGER)
+      )
+    WHERE ${where.join(" AND ")}
+    LIMIT 1
+  `)
+    .bind(...binds)
+    .first();
+}
+
+async function buildCommunityResponse(env, district, articleLimit) {
+  const representatives = await getRepresentativesForDistrict(env, district);
+  const relatedArticles = await getArticlesForCommunityPreview(
+    env,
+    district,
+    representatives,
+    articleLimit
+  );
+
+  return {
+    id: district.id,
+    slug: district.slug,
+    name: district.name,
+    chamber: district.chamber,
+    body: district.body,
+    county: district.county || null,
+    district: district.district_number,
+    label: district.district_label,
+    townsRepresented: splitCommunityList(
+      district.communities_represented || district.towns_represented
+    ),
+    floterial: parseBooleanText(district.floterial),
+    seats: district.seats || representatives.length || null,
+    representativeSummary: {
+      count: representatives.length,
+      names: representatives.map((rep) => rep.name),
+      parties: summarizeParties(representatives),
+    },
+    representatives,
+    relatedArticles,
+  };
 }
 
 async function getRepresentativesForDistrict(env, district) {
@@ -555,6 +713,14 @@ function boundedNumber(value, fallback, min, max) {
   const number = Number(value ?? fallback);
   if (!Number.isFinite(number)) return fallback;
   return Math.min(Math.max(number, min), max);
+}
+
+function normalizeCommunityPathPart(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-")
+    .replace(/\s+/g, "-");
 }
 
 async function getArticlesForLegislator(env, personid, employeeno, limit = 10) {
