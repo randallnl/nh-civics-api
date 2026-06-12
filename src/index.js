@@ -32,6 +32,7 @@ export default {
         endpoints: [
           "/tools",
           "/communities",
+          "/communities/counties/{county}",
           "/communities/house/{county}/{district}",
           "/communities/senate/{district}",
           "/candidates",
@@ -81,6 +82,10 @@ export default {
 
     if (url.pathname === "/communities") {
       return handleCommunities(request, env);
+    }
+
+    if (url.pathname.startsWith("/communities/counties/")) {
+      return handleCommunityCounty(request, env);
     }
 
     if (url.pathname.startsWith("/communities/")) {
@@ -454,6 +459,153 @@ async function handleCommunityDetail(request, env) {
   });
 }
 
+async function handleCommunityCounty(request, env) {
+  const parts = new URL(request.url).pathname.split("/").filter(Boolean);
+  const countySlug = decodeURIComponent(parts[2] || "");
+
+  if (!countySlug) {
+    return json({ error: "Use /communities/counties/{county}." }, 400);
+  }
+
+  const county = await getCountyBySlug(env, countySlug);
+
+  if (!county) {
+    return json({ error: "County not found." }, 404);
+  }
+
+  const districts = await getHouseDistrictsForCounty(env, county);
+  const representativeCounts = await getHouseRepresentativeCountsForCounty(
+    env,
+    county.source_county_id
+  );
+  const towns = new Set();
+
+  for (const district of districts) {
+    for (const town of splitCommunityList(
+      district.communities_represented || district.towns_represented
+    )) {
+      towns.add(town);
+    }
+  }
+
+  const totalHouseCounties = await env.DB.prepare(`
+    SELECT COUNT(DISTINCT LOWER(d.county)) AS total
+    FROM divisions d
+    WHERE d.type = 'house_district'
+      AND COALESCE(d.county, '') != ''
+  `).first();
+
+  return json({
+    counties: [
+      {
+        name: county.name,
+        slug: slugifyPathPart(county.name),
+        districtCount: districts.length,
+        townsRepresented: [...towns].sort((a, b) => a.localeCompare(b)),
+        representativeCount: [...representativeCounts.values()].reduce(
+          (total, count) => total + count,
+          0
+        ),
+        districts: districts.map((district) => ({
+          name: `${county.name} ${district.district_number}`,
+          body: "H",
+          county: county.name,
+          district: district.district_number,
+          path: `/communities/house/${slugifyPathPart(county.name)}/${
+            district.district_number
+          }`,
+        })),
+        relatedArticles: [],
+      },
+    ],
+    meta: {
+      total: totalHouseCounties?.total || 0,
+      body: "house",
+    },
+  });
+}
+
+async function getCountyBySlug(env, countySlug) {
+  const normalizedCounty = normalizeCommunityPathPart(countySlug);
+  const numericCounty = Number(normalizedCounty);
+
+  return env.DB.prepare(`
+    SELECT
+      name,
+      code,
+      source_county_id
+    FROM county_codes
+    WHERE LOWER(name) = ?
+      OR LOWER(REPLACE(name, ' ', '-')) = ?
+      OR LOWER(code) = ?
+      OR source_county_id = ?
+    LIMIT 1
+  `)
+    .bind(
+      normalizedCounty.replace(/-/g, " "),
+      normalizedCounty,
+      normalizedCounty,
+      Number.isFinite(numericCounty) ? numericCounty : -1
+    )
+    .first();
+}
+
+async function getHouseDistrictsForCounty(env, county) {
+  const result = await env.DB.prepare(`
+    SELECT
+      d.id,
+      d.name,
+      d.slug,
+      d.type,
+      'House' AS chamber,
+      'H' AS body,
+      cc.source_county_id AS county_number,
+      d.county,
+      d.district AS district_number,
+      COALESCE(dm.district_label, d.name) AS district_label,
+      COALESCE(dm.communities_represented, d.towns_represented, '') AS communities_represented,
+      d.towns_represented,
+      d.floterial,
+      d.seats
+    FROM divisions d
+    LEFT JOIN county_codes cc
+      ON LOWER(cc.name) = LOWER(d.county)
+    LEFT JOIN d1_district_mapping dm
+      ON dm.body = 'H'
+      AND dm.county = cc.source_county_id
+      AND dm.district = d.district
+    WHERE d.type = 'house_district'
+      AND cc.source_county_id = ?
+    ORDER BY d.district, d.name
+  `)
+    .bind(county.source_county_id)
+    .all();
+
+  return result.results || [];
+}
+
+async function getHouseRepresentativeCountsForCounty(env, countyNumber) {
+  const result = await env.DB.prepare(`
+    SELECT
+      CAST(l.district AS INTEGER) AS district_number,
+      COUNT(*) AS representative_count
+    FROM d1_legislators l
+    WHERE l.active = 1
+      AND l.legislativebody = 'H'
+      AND CAST(l.countycode AS INTEGER) = ?
+    GROUP BY CAST(l.district AS INTEGER)
+  `)
+    .bind(countyNumber)
+    .all();
+
+  return new Map(
+    (result.results || []).map((row) => [
+      row.district_number,
+      row.representative_count,
+    ])
+  );
+}
+
 async function getCommunityDistrict(env, { body, county, districtNumber }) {
   const where = [];
   const binds = [];
@@ -731,6 +883,10 @@ function normalizeCommunityPathPart(value) {
     .toLowerCase()
     .replace(/_/g, "-")
     .replace(/\s+/g, "-");
+}
+
+function slugifyPathPart(value) {
+  return normalizeCommunityPathPart(value);
 }
 
 async function handleCandidates(request, env) {
