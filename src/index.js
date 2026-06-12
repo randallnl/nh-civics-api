@@ -34,6 +34,8 @@ export default {
           "/communities",
           "/communities/house/{county}/{district}",
           "/communities/senate/{district}",
+          "/candidates",
+          "/candidates/{slug-or-filer-entity-number}",
           "/reps/search?town=Manchester",
           "/reps/lookup",
           "/reps/{employeeno}/votes",
@@ -83,6 +85,14 @@ export default {
 
     if (url.pathname.startsWith("/communities/")) {
       return handleCommunityDetail(request, env);
+    }
+
+    if (url.pathname === "/candidates") {
+      return handleCandidates(request, env);
+    }
+
+    if (url.pathname.startsWith("/candidates/")) {
+      return handleCandidateDetail(request, env);
     }
 
     if (url.pathname.startsWith("/reps/") && url.pathname.endsWith("/votes")) {
@@ -721,6 +731,179 @@ function normalizeCommunityPathPart(value) {
     .toLowerCase()
     .replace(/_/g, "-")
     .replace(/\s+/g, "-");
+}
+
+async function handleCandidates(request, env) {
+  const url = new URL(request.url);
+  const q = String(url.searchParams.get("q") || "").trim();
+  const officeType = String(url.searchParams.get("officeType") || "").trim();
+  const office = String(url.searchParams.get("office") || "").trim();
+  const county = String(url.searchParams.get("county") || "").trim();
+  const district = String(url.searchParams.get("district") || "").trim();
+  const party = String(url.searchParams.get("party") || "").trim();
+  const electionYear = url.searchParams.get("electionYear");
+  const limit = boundedNumber(url.searchParams.get("limit"), 50, 1, 100);
+  const offset = boundedNumber(url.searchParams.get("offset"), 0, 0, 10000);
+
+  const where = ["1 = 1"];
+  const binds = [];
+
+  if (q) {
+    const search = `%${q}%`;
+    where.push(`
+      (
+        candidate_first_name LIKE ?
+        OR candidate_last_name LIKE ?
+        OR candidate_first_name || ' ' || candidate_last_name LIKE ?
+        OR slug LIKE ?
+        OR office LIKE ?
+        OR county LIKE ?
+      )
+    `);
+    binds.push(search, search, search, search, search, search);
+  }
+
+  if (officeType) {
+    where.push(`LOWER(office_type) = LOWER(?)`);
+    binds.push(officeType);
+  }
+
+  if (office) {
+    where.push(`LOWER(office) = LOWER(?)`);
+    binds.push(office);
+  }
+
+  if (county) {
+    where.push(`LOWER(county) = LOWER(?)`);
+    binds.push(county);
+  }
+
+  if (district) {
+    where.push(`district = ?`);
+    binds.push(district);
+  }
+
+  if (party) {
+    where.push(`LOWER(political_party) = LOWER(?)`);
+    binds.push(party);
+  }
+
+  if (electionYear) {
+    const year = Number(electionYear);
+    if (!Number.isInteger(year)) {
+      return json({ error: "electionYear must be a number." }, 400);
+    }
+    where.push(`election_year = ?`);
+    binds.push(year);
+  }
+
+  const result = await env.DB.prepare(`
+    SELECT ${candidateSelectColumns()}
+    FROM candidates
+    WHERE ${where.join(" AND ")}
+    ORDER BY
+      election_year DESC,
+      office_type,
+      office,
+      county,
+      CAST(COALESCE(district, '0') AS INTEGER),
+      candidate_last_name,
+      candidate_first_name
+    LIMIT ?
+    OFFSET ?
+  `)
+    .bind(...binds, limit, offset)
+    .all();
+
+  return json({
+    candidates: (result.results || []).map(formatCandidate),
+    meta: {
+      q,
+      officeType,
+      office,
+      county,
+      district,
+      party,
+      electionYear: electionYear ? Number(electionYear) : null,
+      limit,
+      offset,
+      count: result.results?.length || 0,
+    },
+  });
+}
+
+async function handleCandidateDetail(request, env) {
+  const url = new URL(request.url);
+  const identifier = decodeURIComponent(
+    url.pathname.split("/").filter(Boolean)[1] || ""
+  );
+
+  if (!identifier) {
+    return json({ error: "Candidate identifier is required." }, 400);
+  }
+
+  const candidate = await env.DB.prepare(`
+    SELECT ${candidateSelectColumns()}
+    FROM candidates
+    WHERE filer_entity_number = ?
+      OR slug = ?
+    LIMIT 1
+  `)
+    .bind(identifier, identifier)
+    .first();
+
+  if (!candidate) {
+    return json({ error: "Candidate not found." }, 404);
+  }
+
+  return json({
+    candidate: formatCandidate(candidate),
+  });
+}
+
+function candidateSelectColumns() {
+  return `
+    filer_entity_number,
+    candidate_first_name,
+    candidate_last_name,
+    office_type,
+    office,
+    county,
+    district,
+    political_party,
+    election_year,
+    election_cycle,
+    total_raised,
+    total_spent,
+    candidate_website,
+    candidate_email,
+    photo_url,
+    slug
+  `;
+}
+
+function formatCandidate(candidate) {
+  return {
+    filerEntityNumber: candidate.filer_entity_number,
+    candidateFirstName: candidate.candidate_first_name,
+    candidateLastName: candidate.candidate_last_name,
+    name: [candidate.candidate_first_name, candidate.candidate_last_name]
+      .filter(Boolean)
+      .join(" "),
+    officeType: candidate.office_type,
+    office: candidate.office,
+    county: candidate.county,
+    district: candidate.district,
+    politicalParty: candidate.political_party,
+    electionYear: candidate.election_year,
+    electionCycle: candidate.election_cycle,
+    totalRaised: candidate.total_raised,
+    totalSpent: candidate.total_spent,
+    candidateWebsite: candidate.candidate_website,
+    candidateEmail: candidate.candidate_email,
+    photoUrl: candidate.photo_url,
+    slug: candidate.slug,
+  };
 }
 
 async function getArticlesForLegislator(env, personid, employeeno, limit = 10) {

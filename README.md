@@ -38,6 +38,17 @@ npm run dry-run
   - `articleLimit=<0-10>`
 - `GET /communities/house/{county}/{district}`: returns one House district with representatives, towns represented, and related articles.
 - `GET /communities/senate/{district}`: returns one Senate district with representatives, towns represented, and related articles.
+- `GET /candidates`: lists candidates with filing, office, party, fundraising, contact, photo, and slug fields.
+  - `q=<search>`
+  - `officeType=<type>`
+  - `office=<office>`
+  - `county=<county>`
+  - `district=<district>`
+  - `party=<party>`
+  - `electionYear=<year>`
+  - `limit=<1-100>`
+  - `offset=<number>`
+- `GET /candidates/{slug-or-filer-entity-number}`: returns one candidate.
 
 ## Required Cloudflare bindings
 
