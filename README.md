@@ -49,6 +49,8 @@ npm run dry-run
   - `limit=<1-100>`
   - `offset=<number>`
 - `GET /candidates/{slug-or-filer-entity-number}`: returns one candidate.
+- `POST /reps/lookup`: returns civic district matches, representatives, grouped representatives, and matching candidates for the address.
+  - `candidateYear=<year>` defaults to `2026`
 
 ## Required Cloudflare bindings
 

@@ -861,25 +861,82 @@ async function handleCandidateDetail(request, env) {
   });
 }
 
-function candidateSelectColumns() {
-  return `
-    filer_entity_number,
-    candidate_first_name,
-    candidate_last_name,
-    office_type,
-    office,
-    county,
-    district,
-    political_party,
-    election_year,
-    election_cycle,
-    total_raised,
-    total_spent,
-    candidate_website,
-    candidate_email,
-    photo_url,
-    slug
-  `;
+async function getCandidatesForAddressDistricts(
+  env,
+  parsed,
+  houseDistricts,
+  electionYear
+) {
+  const conditions = [];
+  const binds = [];
+
+  if (parsed.senate?.district) {
+    conditions.push(`
+      (
+        c.office = 'State Senate'
+        AND c.district = ?
+      )
+    `);
+    binds.push(String(parsed.senate.district));
+  }
+
+  for (const district of houseDistricts || []) {
+    if (!district.county || !district.district) continue;
+
+    conditions.push(`
+      (
+        c.office = 'State Representative'
+        AND cc.source_county_id = ?
+        AND c.district = ?
+      )
+    `);
+    binds.push(district.county, String(district.district));
+  }
+
+  if (!conditions.length) return [];
+
+  const result = await env.DB.prepare(`
+    SELECT DISTINCT ${candidateSelectColumns("c")}
+    FROM candidates c
+    LEFT JOIN county_codes cc
+      ON LOWER(cc.name) = LOWER(c.county)
+    WHERE c.election_year = ?
+      AND (${conditions.map((condition) => `(${condition})`).join(" OR ")})
+    ORDER BY
+      c.office,
+      c.county,
+      CAST(COALESCE(c.district, '0') AS INTEGER),
+      c.candidate_last_name,
+      c.candidate_first_name
+  `)
+    .bind(electionYear, ...binds)
+    .all();
+
+  return (result.results || []).map(formatCandidate);
+}
+
+function candidateSelectColumns(tableAlias = "") {
+  const prefix = tableAlias ? `${tableAlias}.` : "";
+  return [
+    "filer_entity_number",
+    "candidate_first_name",
+    "candidate_last_name",
+    "office_type",
+    "office",
+    "county",
+    "district",
+    "political_party",
+    "election_year",
+    "election_cycle",
+    "total_raised",
+    "total_spent",
+    "candidate_website",
+    "candidate_email",
+    "photo_url",
+    "slug",
+  ]
+    .map((column) => `${prefix}${column}`)
+    .join(", ");
 }
 
 function formatCandidate(candidate) {
@@ -1010,6 +1067,12 @@ async function handleAddressLookup(request, env) {
     const address = String(body.address || "").trim();
     const url = new URL(request.url);
     const voteLimit = Number(url.searchParams.get("voteLimit") || 50);
+    const candidateYear = boundedNumber(
+      url.searchParams.get("candidateYear"),
+      2026,
+      2000,
+      2100
+    );
 
     if (!address) {
       return json({ error: "Address is required." }, 400);
@@ -1045,6 +1108,13 @@ async function handleAddressLookup(request, env) {
       voteLimit
     );
 
+    const candidates = await getCandidatesForAddressDistricts(
+      env,
+      parsed,
+      houseDistricts,
+      candidateYear
+    );
+
     return json({
       address,
       normalizedInput: civicData.normalizedInput || null,
@@ -1056,9 +1126,18 @@ async function handleAddressLookup(request, env) {
       },
       matchedDistricts,
       representatives,
+      candidates,
       groups: {
         senate: representatives.filter((r) => r.chamber === "Senate"),
         house: representatives.filter((r) => r.chamber === "House"),
+        candidates: {
+          senate: candidates.filter((candidate) => candidate.office === "State Senate"),
+          house: candidates.filter((candidate) => candidate.office === "State Representative"),
+        },
+      },
+      meta: {
+        voteLimit,
+        candidateYear,
       },
     });
   } catch (error) {
