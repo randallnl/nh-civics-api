@@ -6,7 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "routes": [
     {
-      "pattern": "nhciviccommons.com",
+      "pattern": "api.nhciviccommons.com",
       "custom_domain": true
     }
   ],
