@@ -33,6 +33,7 @@ export default {
           "/tools",
           "/communities",
           "/communities/counties/{county}",
+          "/communities/towns/{town}",
           "/communities/house/{county}/{district}",
           "/communities/senate/{district}",
           "/candidates",
@@ -86,6 +87,10 @@ export default {
 
     if (url.pathname.startsWith("/communities/counties/")) {
       return handleCommunityCounty(request, env);
+    }
+
+    if (url.pathname.startsWith("/communities/towns/")) {
+      return handleCommunityTown(request, env);
     }
 
     if (url.pathname.startsWith("/communities/")) {
@@ -452,7 +457,9 @@ async function handleCommunityDetail(request, env) {
   }
 
   return json({
-    community: await buildCommunityResponse(env, district, articleLimit),
+    community: await buildCommunityResponse(env, district, articleLimit, {
+      includeSenators: kind === "house",
+    }),
     meta: {
       articleLimit,
     },
@@ -525,6 +532,91 @@ async function handleCommunityCounty(request, env) {
     meta: {
       total: totalHouseCounties?.total || 0,
       body: "house",
+    },
+  });
+}
+
+async function handleCommunityTown(request, env) {
+  const url = new URL(request.url);
+  const parts = url.pathname.split("/").filter(Boolean);
+  const townSlug = decodeURIComponent(parts[2] || "");
+  const articleLimit = boundedNumber(
+    url.searchParams.get("articleLimit"),
+    5,
+    0,
+    25
+  );
+  const voteLimit = boundedNumber(url.searchParams.get("voteLimit"), 0, 0, 100);
+  const candidateYear = boundedNumber(
+    url.searchParams.get("candidateYear"),
+    2026,
+    2000,
+    2100
+  );
+
+  if (!townSlug) {
+    return json({ error: "Use /communities/towns/{town}." }, 400);
+  }
+
+  const townName = titleizeCommunityName(townSlug);
+  const districts = await findTownDistricts(env, townName);
+
+  if (!districts.length) {
+    return json({ error: "Town not found." }, 404);
+  }
+
+  const houseDistricts = districts.filter((district) => district.body === "H");
+  const senateDistricts = districts.filter((district) => district.body === "S");
+  const representatives = await attachVoteHistory(
+    env,
+    [
+      ...(await findSenatorsForDistricts(env, senateDistricts)),
+      ...(await findHouseRepsFromDistrictMappings(env, houseDistricts)),
+    ],
+    voteLimit
+  );
+  const candidates = await getCandidatesForDistrictMappings(
+    env,
+    districts,
+    candidateYear
+  );
+  const relatedArticles = await getArticlesForTownPreview(
+    env,
+    townName,
+    representatives,
+    articleLimit
+  );
+
+  return json({
+    town: {
+      name: townName,
+      slug: slugifyPathPart(townName),
+    },
+    districts: districts.map(formatTownDistrict),
+    representativeSummary: {
+      count: representatives.length,
+      names: representatives.map((rep) => rep.name),
+      parties: summarizeParties(representatives),
+    },
+    representatives,
+    candidates,
+    groups: {
+      senate: {
+        districts: senateDistricts.map(formatTownDistrict),
+        representatives: representatives.filter((rep) => rep.chamber === "Senate"),
+        candidates: candidates.filter((candidate) => candidate.office === "State Senate"),
+      },
+      house: {
+        districts: houseDistricts.map(formatTownDistrict),
+        representatives: representatives.filter((rep) => rep.chamber === "House"),
+        candidates: candidates.filter((candidate) => candidate.office === "State Representative"),
+      },
+    },
+    relatedArticles,
+    meta: {
+      articleLimit,
+      voteLimit,
+      candidateYear,
     },
   });
 }
@@ -610,6 +702,242 @@ async function getHouseRepresentativeCountsForCounty(env, countyNumber) {
   );
 }
 
+async function findTownDistricts(env, townName) {
+  const normalizedTown = normalizeCommunityText(townName);
+
+  if (!normalizedTown) return [];
+
+  const searchPatterns = getTownSearchPatterns(normalizedTown);
+  const result = await env.DB.prepare(`
+    SELECT DISTINCT
+      dm.body,
+      dm.county,
+      cc.name AS county_name,
+      dm.district,
+      dm.district_label,
+      dm.communities_represented
+    FROM d1_district_mapping dm
+    LEFT JOIN county_codes cc
+      ON cc.source_county_id = dm.county
+    WHERE ${searchPatterns
+      .map(() => "LOWER(dm.communities_represented) LIKE LOWER(?)")
+      .join(" OR ")}
+    ORDER BY
+      CASE dm.body
+        WHEN 'S' THEN 1
+        WHEN 'H' THEN 2
+        ELSE 3
+      END,
+      dm.county,
+      dm.district
+  `)
+    .bind(...searchPatterns)
+    .all();
+
+  const seen = new Set();
+
+  return (result.results || []).filter((district) => {
+    if (!townDistrictMatches(district.communities_represented, normalizedTown)) {
+      return false;
+    }
+
+    const key = `${district.body}_${district.county}_${district.district}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function getTownSearchPatterns(normalizedTown) {
+  const patterns = [`%${normalizedTown}%`];
+
+  if (normalizedTown === "manchester") {
+    patterns.push("%mancheseter%");
+  }
+
+  return patterns;
+}
+
+function townDistrictMatches(communities, normalizedTown) {
+  return splitCommunityList(communities).some((community) => {
+    const normalizedCommunity = normalizeCommunityText(
+      getCountyTownName(community)
+    );
+
+    return normalizedCommunity === normalizedTown;
+  });
+}
+
+function districtCommunitiesOverlap(houseCommunities, senateCommunities) {
+  return houseCommunities.some((houseCommunity) =>
+    senateCommunities.some((senateCommunity) =>
+      senateCommunityCoversHouseCommunity(senateCommunity, houseCommunity)
+    )
+  );
+}
+
+function senateCommunityCoversHouseCommunity(senateCommunity, houseCommunity) {
+  const senateTown = normalizeCommunityText(getCountyTownName(senateCommunity));
+  const houseTown = normalizeCommunityText(getCountyTownName(houseCommunity));
+
+  if (!senateTown || senateTown !== houseTown) return false;
+
+  const senateWards = getCommunityWardNumbers(senateCommunity);
+  const houseWards = getCommunityWardNumbers(houseCommunity);
+
+  if (!houseWards.length || !senateWards.length) return true;
+
+  return houseWards.every((ward) => senateWards.includes(ward));
+}
+
+function getCommunityWardNumbers(value) {
+  const normalized = String(value || "")
+    .replace(/^Mancheseter\b/i, "Manchester")
+    .toLowerCase();
+  const wardMatch = normalized.match(/\bwards?\s+(.+)$/i);
+
+  if (!wardMatch) return [];
+
+  return wardMatch[1]
+    .match(/\d+/g)
+    ?.map((ward) => Number(ward))
+    .filter((ward) => Number.isInteger(ward)) || [];
+}
+
+function formatTownDistrict(district) {
+  return {
+    name:
+      district.body === "S"
+        ? `Senate ${district.district}`
+        : `${district.county_name || countyCodeFromNumber(district.county)} ${
+            district.district
+          }`,
+    body: district.body,
+    chamber: district.body === "S" ? "Senate" : "House",
+    county: district.county_name || null,
+    countyNumber: district.county || null,
+    district: district.district,
+    label: district.district_label,
+    path:
+      district.body === "S"
+        ? `/communities/senate/${district.district}`
+        : `/communities/house/${slugifyPathPart(
+            district.county_name || countyCodeFromNumber(district.county)
+          )}/${district.district}`,
+  };
+}
+
+async function findSenatorsForDistricts(env, districts) {
+  const reps = [];
+
+  for (const district of districts || []) {
+    reps.push(...(await findSenators(env, { district: district.district })));
+  }
+
+  return dedupeReps(reps);
+}
+
+async function getCandidatesForDistrictMappings(env, districts, electionYear) {
+  const conditions = [];
+  const binds = [];
+
+  for (const district of districts || []) {
+    if (district.body === "S") {
+      conditions.push(`
+        (
+          c.office = 'State Senate'
+          AND c.district = ?
+        )
+      `);
+      binds.push(String(district.district));
+    }
+
+    if (district.body === "H") {
+      conditions.push(`
+        (
+          c.office = 'State Representative'
+          AND cc.source_county_id = ?
+          AND c.district = ?
+        )
+      `);
+      binds.push(district.county, String(district.district));
+    }
+  }
+
+  if (!conditions.length) return [];
+
+  const result = await env.DB.prepare(`
+    SELECT DISTINCT ${candidateSelectColumns("c")}
+    FROM candidates c
+    LEFT JOIN county_codes cc
+      ON LOWER(cc.name) = LOWER(c.county)
+    WHERE c.election_year = ?
+      AND (${conditions.map((condition) => `(${condition})`).join(" OR ")})
+    ORDER BY
+      c.office,
+      c.county,
+      CAST(COALESCE(c.district, '0') AS INTEGER),
+      c.candidate_last_name,
+      c.candidate_first_name
+  `)
+    .bind(electionYear, ...binds)
+    .all();
+
+  return (result.results || []).map(formatCandidate);
+}
+
+async function getArticlesForTownPreview(env, townName, representatives, limit) {
+  if (!limit) return [];
+
+  const normalizedTown = normalizeCommunityText(townName);
+  const personids = representatives
+    .map((rep) => rep.personid || rep.id)
+    .filter(Boolean);
+  const employeenos = representatives
+    .map((rep) => rep.employeeno)
+    .filter(Boolean);
+  const conditions = [`LOWER(at.town) = ?`];
+  const binds = [normalizedTown];
+
+  if (personids.length) {
+    conditions.push(
+      `al.personid IN (${personids.map(() => "?").join(", ")})`
+    );
+    binds.push(...personids);
+  }
+
+  if (employeenos.length) {
+    conditions.push(
+      `al.employeeno IN (${employeenos.map(() => "?").join(", ")})`
+    );
+    binds.push(...employeenos);
+  }
+
+  const result = await env.DB.prepare(`
+    SELECT DISTINCT
+      a.article_id,
+      a.title,
+      a.resource_type,
+      a.publisher,
+      a.url,
+      a.summary,
+      a.created_at,
+      a.updated_at
+    FROM d1_articles a
+    LEFT JOIN d1_article_towns at
+      ON at.article_id = a.article_id
+    LEFT JOIN d1_article_legislators al
+      ON al.article_id = a.article_id
+    WHERE ${conditions.map((condition) => `(${condition})`).join(" OR ")}
+    ORDER BY a.created_at DESC, a.title
+    LIMIT ?
+  `)
+    .bind(...binds, limit)
+    .all();
+
+  return result.results || [];
+}
+
 async function getCommunityDistrict(env, { body, county, districtNumber }) {
   const where = [];
   const binds = [];
@@ -691,8 +1019,12 @@ async function getCommunityDistrict(env, { body, county, districtNumber }) {
     .first();
 }
 
-async function buildCommunityResponse(env, district, articleLimit) {
+async function buildCommunityResponse(env, district, articleLimit, options = {}) {
   const representatives = await getRepresentativesForDistrict(env, district);
+  const senators =
+    options.includeSenators && district.body === "H"
+      ? await getSenatorsForHouseDistrict(env, district)
+      : [];
   const relatedArticles = await getArticlesForCommunityPreview(
     env,
     district,
@@ -700,7 +1032,7 @@ async function buildCommunityResponse(env, district, articleLimit) {
     articleLimit
   );
 
-  return {
+  const response = {
     id: district.id,
     slug: district.slug,
     name: district.name,
@@ -722,6 +1054,47 @@ async function buildCommunityResponse(env, district, articleLimit) {
     representatives,
     relatedArticles,
   };
+
+  if (options.includeSenators && district.body === "H") {
+    response.senators = senators;
+    response.senatorSummary = {
+      count: senators.length,
+      names: senators.map((senator) => senator.name),
+      parties: summarizeParties(senators),
+    };
+  }
+
+  return response;
+}
+
+async function getSenatorsForHouseDistrict(env, district) {
+  const houseCommunities = splitDistrictCommunities(
+    district.towns_represented || district.communities_represented
+  );
+
+  if (!houseCommunities.length) return [];
+
+  const result = await env.DB.prepare(`
+    SELECT
+      dm.body,
+      dm.county,
+      NULL AS county_name,
+      dm.district,
+      dm.district_label,
+      dm.communities_represented
+    FROM d1_district_mapping dm
+    WHERE dm.body = 'S'
+    ORDER BY dm.district
+  `).all();
+
+  const senateDistricts = (result.results || []).filter((senateDistrict) =>
+    districtCommunitiesOverlap(
+      houseCommunities,
+      splitDistrictCommunities(senateDistrict.communities_represented)
+    )
+  );
+
+  return findSenatorsForDistricts(env, senateDistricts);
 }
 
 async function getRepresentativesForDistrict(env, district) {
@@ -845,6 +1218,22 @@ function splitCommunityList(value) {
     .filter(Boolean);
 }
 
+function splitDistrictCommunities(value) {
+  return String(value || "")
+    .split(/;/)
+    .flatMap((part) => {
+      const trimmed = part.trim();
+
+      if (/\bwards?\s+\d+(?:\s*,\s*\d+)+/i.test(trimmed)) {
+        return [trimmed];
+      }
+
+      return trimmed.split(",");
+    })
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function getCountyTownName(value) {
   const town = String(value || "")
     .trim()
@@ -902,6 +1291,15 @@ function normalizeCommunityPathPart(value) {
 
 function slugifyPathPart(value) {
   return normalizeCommunityPathPart(value);
+}
+
+function titleizeCommunityName(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
 }
 
 async function handleCandidates(request, env) {
@@ -2026,6 +2424,13 @@ function dedupeReps(reps) {
 }
 
 async function attachVoteHistory(env, reps, limit = 50) {
+  if (!limit) {
+    return (reps || []).map((rep) => ({
+      ...rep,
+      voteHistory: [],
+    }));
+  }
+
   const enriched = [];
 
   for (const rep of reps || []) {

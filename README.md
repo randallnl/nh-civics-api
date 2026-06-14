@@ -37,7 +37,11 @@ npm run dry-run
   - `offset=<number>`
   - `articleLimit=<0-10>`
 - `GET /communities/counties/{county}`: returns a House county summary with district paths, towns represented, representative count, and related article placeholders.
-- `GET /communities/house/{county}/{district}`: returns one House district with representatives, towns represented, and related articles.
+- `GET /communities/towns/{town}`: returns a town or city summary with House and Senate districts, representatives, matching candidates, and related article previews.
+  - `articleLimit=<0-25>`
+  - `voteLimit=<0-100>` defaults to `0`
+  - `candidateYear=<year>` defaults to `2026`
+- `GET /communities/house/{county}/{district}`: returns one House district with representatives, senators, towns represented, and related articles.
 - `GET /communities/senate/{district}`: returns one Senate district with representatives, towns represented, and related articles.
 - `GET /candidates`: lists candidates with filing, office, party, fundraising, contact, photo, and slug fields.
   - `q=<search>`
