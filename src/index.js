@@ -392,7 +392,7 @@ function handleVotingWidgetScript(request) {
         data-tone="\${escapeHtml(tone)}"
       >
         <strong>\${escapeHtml(billLabel)}</strong>
-        <span>\${vote}</span>
+        <span class="nhcc-vote-choice">\${vote}</span>
         \${item.interpretation ? \`<em>\${escapeHtml(item.interpretation)}</em>\` : ""}
       </button>\`;
     }).join("")}</div>\`;
@@ -584,11 +584,14 @@ function handleVotingWidgetScript(request) {
         .nhcc-grade p { grid-column: 1 / -1; color: #526173; font-size: .86rem; }
         .nhcc-vote-label { margin: 12px 0 6px; color: #526173; font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
         .nhcc-vote-tags { display: flex; flex-wrap: wrap; gap: 8px; }
-        .nhcc-vote-tag { display: inline-flex; flex-direction: column; gap: 2px; max-width: 100%; border: 1px solid #e1e7ef; border-radius: 999px; padding: 6px 9px; background: #fff; color: #18212f; cursor: pointer; text-align: left; font: inherit; font-size: .78rem; }
+        .nhcc-vote-tag { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 5px; max-width: 100%; border: 1px solid #e1e7ef; border-radius: 10px; padding: 8px 10px; background: #fff; color: #18212f; cursor: pointer; text-align: left; font: inherit; font-size: .78rem; }
         .nhcc-vote-tag strong { color: #174ea6; overflow-wrap: anywhere; }
+        .nhcc-vote-choice { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 9px; background: #18212f; color: #fff; font-size: .82rem; font-weight: 900; line-height: 1.1; text-transform: uppercase; }
         .nhcc-vote-tag em { color: #18212f; font-style: normal; font-weight: 800; }
         .nhcc-vote-tag[data-tone="pro"] { background: #ecfdf3; border-color: #bbf7d0; color: #166534; }
         .nhcc-vote-tag[data-tone="anti"] { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+        .nhcc-vote-tag[data-tone="pro"] .nhcc-vote-choice { background: #166534; }
+        .nhcc-vote-tag[data-tone="anti"] .nhcc-vote-choice { background: #991b1b; }
         .nhcc-empty { color: #526173; font-size: .92rem; }
         .nhcc-vote { border-radius: 999px; padding: 4px 8px; background: #edf1f6; color: #344255; font-size: .82rem; white-space: nowrap; }
         .nhcc-vote--yea { background: #e7f5ee; color: #146c43; }
