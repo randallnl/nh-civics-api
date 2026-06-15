@@ -517,7 +517,10 @@ function parseBillTrackerCsv(csvText) {
   return rows
     .map((row) => {
       const record = Object.fromEntries(
-        headers.map((header, index) => [header.trim(), row[index] || ""])
+        headers.map((header, index) => [
+          header.trim().replace(/^\uFEFF/, ""),
+          row[index] || "",
+        ])
       );
       const code = normalizeBillNumber(record.Code);
 
@@ -563,12 +566,12 @@ function parseCsv(text) {
     } else if (char === ",") {
       row.push(field);
       field = "";
-    } else if (char === "\\n") {
+    } else if (char === "\n") {
       row.push(field);
       rows.push(row);
       row = [];
       field = "";
-    } else if (char !== "\\r") {
+    } else if (char !== "\r") {
       field += char;
     }
   }
