@@ -300,6 +300,30 @@ function handleVotingWidgetScript(request) {
     return "mix";
   }
 
+  function getPartyLabel(party) {
+    const value = String(party || "").trim();
+    const lower = value.toLowerCase();
+    if (lower === "d" || lower.includes("democrat")) return "Democrat";
+    if (lower === "r" || lower.includes("republican")) return "Republican";
+    if (lower === "i" || lower.includes("independent")) return "Independent";
+    return value || "Unknown";
+  }
+
+  function getPartyTone(party) {
+    const label = getPartyLabel(party).toLowerCase();
+    if (label === "democrat") return "democrat";
+    if (label === "republican") return "republican";
+    if (label === "independent") return "independent";
+    return "other";
+  }
+
+  function getDistrictLine(rep) {
+    const district = [rep.chamber, rep.district].filter(Boolean).join(" ");
+    const towns = rep.location_text || rep.locationText || "";
+    if (district && towns) return district + " · " + towns;
+    return district || towns || "";
+  }
+
   function percentToLetter(pct) {
     if (pct >= 90) return "A";
     if (pct >= 80) return "B";
@@ -360,13 +384,14 @@ function handleVotingWidgetScript(request) {
     return \`<div class="nhcc-vote-tags">\${votes.map((item) => {
       const vote = item.vote ? escapeHtml(item.vote.vote) : "No recorded vote";
       const tone = getTone(item.interpretation);
+      const billLabel = item.bill.name || item.bill.code;
       return \`<button
         type="button"
         class="nhcc-vote-tag"
         data-bill-code="\${escapeHtml(item.bill.code)}"
         data-tone="\${escapeHtml(tone)}"
       >
-        <strong>\${escapeHtml(item.bill.code)}</strong>
+        <strong>\${escapeHtml(billLabel)}</strong>
         <span>\${vote}</span>
         \${item.interpretation ? \`<em>\${escapeHtml(item.interpretation)}</em>\` : ""}
       </button>\`;
@@ -389,6 +414,9 @@ function handleVotingWidgetScript(request) {
     const visibleVotes = (rep.trackedVotes || []).filter((item) => voteMatchesIssue(item, issue));
     const stats = calcGradeStats(visibleVotes);
     const photo = rep.photo ? \`<img class="nhcc-rep-photo" src="\${escapeHtml(rep.photo)}" alt="">\` : "";
+    const partyLabel = getPartyLabel(rep.party);
+    const partyTone = getPartyTone(rep.party);
+    const districtLine = getDistrictLine(rep);
 
     card.className = "nhcc-rep-card";
     card.innerHTML = \`
@@ -396,7 +424,10 @@ function handleVotingWidgetScript(request) {
         \${photo}
         <div>
           <h3>\${escapeHtml(rep.name)}</h3>
-          <p>\${escapeHtml(rep.chamber)} \${escapeHtml(rep.district || "")} · \${escapeHtml(rep.party || "")}</p>
+          <div class="nhcc-rep-meta">
+            \${districtLine ? \`<span>\${escapeHtml(districtLine)}</span>\` : ""}
+            <span class="nhcc-party-pill nhcc-party-pill--\${escapeHtml(partyTone)}">\${escapeHtml(partyLabel)}</span>
+          </div>
           \${rep.email ? \`<p><a href="mailto:\${escapeHtml(rep.email)}">\${escapeHtml(rep.email)}</a></p>\` : ""}
         </div>
       </div>
@@ -537,6 +568,12 @@ function handleVotingWidgetScript(request) {
         .nhcc-rep-main h3 { margin: 0 0 4px; }
         .nhcc-rep-main p { color: #526173; font-size: .9rem; margin-top: 2px; }
         .nhcc-rep-main a { color: #174ea6; }
+        .nhcc-rep-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: #526173; font-size: .9rem; margin-top: 2px; }
+        .nhcc-party-pill { display: inline-flex; align-items: center; border-radius: 999px; border: 1px solid #e1e7ef; padding: 3px 8px; font-size: .74rem; font-weight: 800; line-height: 1.2; }
+        .nhcc-party-pill--democrat { background: #dbeafe; border-color: #bfdbfe; color: #1d4ed8; }
+        .nhcc-party-pill--republican { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
+        .nhcc-party-pill--independent { background: #fef9c3; border-color: #fde047; color: #854d0e; }
+        .nhcc-party-pill--other { background: #f3f4f6; border-color: #e5e7eb; color: #374151; }
         .nhcc-grade { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; margin: 10px 0; padding: 10px; border-radius: 12px; border: 1px solid #e1e7ef; background: #f9fafb; }
         .nhcc-grade span { color: #526173; font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
         .nhcc-grade strong { border-radius: 999px; padding: 6px 10px; background: #edf1f6; font-size: 1.15rem; }
@@ -548,7 +585,7 @@ function handleVotingWidgetScript(request) {
         .nhcc-vote-label { margin: 12px 0 6px; color: #526173; font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
         .nhcc-vote-tags { display: flex; flex-wrap: wrap; gap: 8px; }
         .nhcc-vote-tag { display: inline-flex; flex-direction: column; gap: 2px; max-width: 100%; border: 1px solid #e1e7ef; border-radius: 999px; padding: 6px 9px; background: #fff; color: #18212f; cursor: pointer; text-align: left; font: inherit; font-size: .78rem; }
-        .nhcc-vote-tag strong { color: #174ea6; }
+        .nhcc-vote-tag strong { color: #174ea6; overflow-wrap: anywhere; }
         .nhcc-vote-tag em { color: #18212f; font-style: normal; font-weight: 800; }
         .nhcc-vote-tag[data-tone="pro"] { background: #ecfdf3; border-color: #bbf7d0; color: #166534; }
         .nhcc-vote-tag[data-tone="anti"] { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
