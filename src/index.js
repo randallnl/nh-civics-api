@@ -239,7 +239,7 @@ function handleVotingWidgetPage(request) {
   <title>${escapeHtml(title)}</title>
   <style>
     html, body { margin: 0; padding: 0; background: transparent; }
-    body { min-height: 100vh; }
+    html, body { overflow: hidden; }
     [data-nhcc-voting-widget] { display: block; }
   </style>
 </head>
@@ -251,6 +251,19 @@ function handleVotingWidgetPage(request) {
     data-button-text="${escapeHtml(buttonText)}"
   ></div>
   <script src="/widgets/voting-info.js"></script>
+  <script>
+    (() => {
+      const notifyHeight = () => {
+        const height = Math.ceil(document.documentElement.scrollHeight || document.body.scrollHeight || 0);
+        window.parent?.postMessage({ type: "nhcc:voting-widget:height", height }, "*");
+      };
+      if ("ResizeObserver" in window) {
+        new ResizeObserver(notifyHeight).observe(document.body);
+      }
+      window.addEventListener("load", notifyHeight);
+      setTimeout(notifyHeight, 250);
+    })();
+  </script>
 </body>
 </html>`);
 }
@@ -761,6 +774,14 @@ async function handleVotingWidgetLookup(request, env) {
       lookup.representatives || [],
       bills
     );
+    const votedBillKeys = new Set(
+      representatives.flatMap((rep) =>
+        (rep.trackedVotes || []).map((item) => getTrackedVoteKey(item.bill))
+      )
+    );
+    const visibleBills = bills.filter((bill) =>
+      votedBillKeys.has(getTrackedVoteKey(bill))
+    );
 
     return json({
       address,
@@ -770,10 +791,11 @@ async function handleVotingWidgetLookup(request, env) {
         senate: representatives.filter((rep) => rep.chamber === "Senate"),
         house: representatives.filter((rep) => rep.chamber === "House"),
       },
-      bills,
+      bills: visibleBills,
       meta: {
         billTrackerUrl: trackerUrl,
-        billCount: bills.length,
+        billCount: visibleBills.length,
+        trackerBillCount: bills.length,
       },
     });
   } catch (error) {
@@ -838,9 +860,41 @@ function parseBillTrackerCsv(csvText) {
         nayImpact: record["Nay Impact"] || "",
         testimonySupporting: record["Testimony Supporting"] || "",
         testimonyOpposed: record["Testimony Opposed"] || "",
+        voteSequence: normalizeVoteSequence(
+          getRecordValue(record, [
+            "Vote Sequence",
+            "VoteSequence",
+            "Vote Sequence Number",
+            "VoteSequenceNumber",
+            "Vote Seq",
+            "VoteSeq",
+          ])
+        ),
       };
     })
     .filter(Boolean);
+}
+
+function getRecordValue(record, names) {
+  for (const name of names) {
+    if (record[name] !== undefined) return record[name];
+  }
+
+  const normalizedNames = new Set(
+    names.map((name) => name.toLowerCase().replace(/[^a-z0-9]/g, ""))
+  );
+  const entry = Object.entries(record).find(([key]) =>
+    normalizedNames.has(key.toLowerCase().replace(/[^a-z0-9]/g, ""))
+  );
+  return entry ? entry[1] : "";
+}
+
+function normalizeVoteSequence(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  const number = Number(text);
+  return Number.isFinite(number) ? String(Math.trunc(number)) : text;
 }
 
 function parseCsv(text) {
@@ -895,24 +949,35 @@ async function attachTrackedBillVotes(env, representatives, bills) {
   if (!billCodes.length || !employeenos.length) {
     return representatives.map((rep) => ({
       ...rep,
-      trackedVotes: bills.map((bill) => ({ bill, vote: null })),
+      trackedVotes: [],
     }));
   }
 
-  const votes = await getTrackedVotes(env, employeenos, billCodes);
+  const votes = await getTrackedVotes(env, employeenos, bills);
 
   return representatives.map((rep) => {
     const repVotes = votes.get(String(rep.employeeno)) || new Map();
 
     return {
       ...rep,
-      trackedVotes: bills.map((bill) => ({
-        bill,
-        vote: repVotes.get(bill.code) || null,
-        interpretation: getVoteInterpretation(bill, repVotes.get(bill.code)),
-      })),
+      trackedVotes: bills
+        .map((bill) => {
+          const vote = repVotes.get(getTrackedVoteKey(bill)) || null;
+          if (!vote) return null;
+
+          return {
+            bill,
+            vote,
+            interpretation: getVoteInterpretation(bill, vote),
+          };
+        })
+        .filter(Boolean),
     };
   });
+}
+
+function getTrackedVoteKey(bill) {
+  return bill.voteSequence ? `sequence:${bill.voteSequence}` : `bill:${bill.code}`;
 }
 
 function getVoteInterpretation(bill, vote) {
@@ -929,7 +994,25 @@ function getVoteInterpretation(bill, vote) {
   return "";
 }
 
-async function getTrackedVotes(env, employeenos, billCodes) {
+async function getTrackedVotes(env, employeenos, bills) {
+  const billCodes = bills.map((bill) => bill.code).filter(Boolean);
+  const voteSequences = bills
+    .map((bill) => bill.voteSequence)
+    .filter(Boolean);
+  const voteSequenceSet = new Set(voteSequences);
+  const whereParts = [];
+  const binds = [...employeenos];
+
+  if (billCodes.length) {
+    whereParts.push(`UPPER(h.condensedbillno) IN (${billCodes.map(() => "?").join(", ")})`);
+    binds.push(...billCodes);
+  }
+
+  if (voteSequences.length) {
+    whereParts.push(`CAST(h.votesequencenumber AS TEXT) IN (${voteSequences.map(() => "?").join(", ")})`);
+    binds.push(...voteSequences);
+  }
+
   const result = await env.DB.prepare(`
     SELECT
       h.employeenumber,
@@ -956,10 +1039,10 @@ async function getTrackedVotes(env, employeenos, billCodes) {
       AND rs.legislativebody = h.legislativebody
       AND rs.votesequencenumber = h.votesequencenumber
     WHERE h.employeenumber IN (${employeenos.map(() => "?").join(", ")})
-      AND UPPER(h.condensedbillno) IN (${billCodes.map(() => "?").join(", ")})
+      AND (${whereParts.join(" OR ")})
     ORDER BY h.sessionyear DESC, h.votesequencenumber DESC
   `)
-    .bind(...employeenos, ...billCodes)
+    .bind(...binds)
     .all();
 
   const votes = new Map();
@@ -967,9 +1050,13 @@ async function getTrackedVotes(env, employeenos, billCodes) {
   for (const vote of result.results || []) {
     const repKey = String(vote.employeenumber);
     const billKey = normalizeBillNumber(vote.condensedbillno);
+    const sequenceKey = normalizeVoteSequence(vote.votesequencenumber);
+    const voteKey = voteSequenceSet.has(sequenceKey)
+      ? `sequence:${sequenceKey}`
+      : `bill:${billKey}`;
 
     if (!votes.has(repKey)) votes.set(repKey, new Map());
-    if (!votes.get(repKey).has(billKey)) votes.get(repKey).set(billKey, vote);
+    if (!votes.get(repKey).has(voteKey)) votes.get(repKey).set(voteKey, vote);
   }
 
   return votes;
