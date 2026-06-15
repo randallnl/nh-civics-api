@@ -297,10 +297,12 @@ function handleVotingWidgetScript(request) {
     const votes = (rep.trackedVotes || []).map((item) => {
       const vote = item.vote ? escapeHtml(item.vote.vote) : "No recorded vote";
       const voteClass = item.vote ? "nhcc-vote nhcc-vote--" + escapeHtml(item.vote.vote) : "nhcc-vote";
+      const interpretation = item.interpretation ? \`<span class="nhcc-interpretation">\${escapeHtml(item.interpretation)}</span>\` : "";
       return \`<li>
         <div>
-          <strong>\${escapeHtml(item.bill.code)}</strong>
+          <button type="button" class="nhcc-bill-link" data-bill-code="\${escapeHtml(item.bill.code)}">\${escapeHtml(item.bill.code)}</button>
           <span>\${escapeHtml(item.bill.name || item.bill.summary || "")}</span>
+          \${interpretation}
         </div>
         <span class="\${voteClass}">\${vote}</span>
       </li>\`;
@@ -320,6 +322,7 @@ function handleVotingWidgetScript(request) {
 
   function renderResults(root, data) {
     const reps = data.representatives || [];
+    root.__nhccBills = data.bills || [];
     root.querySelector("[data-results]").innerHTML = \`
       <div class="nhcc-summary">
         <strong>\${escapeHtml(data.address)}</strong>
@@ -327,6 +330,45 @@ function handleVotingWidgetScript(request) {
       </div>
       <div class="nhcc-grid">\${reps.map(repCard).join("")}</div>
     \`;
+  }
+
+  function billDialog(bill) {
+    return \`<div class="nhcc-dialog-backdrop" data-dialog-backdrop>
+      <section class="nhcc-dialog" role="dialog" aria-modal="true" aria-labelledby="nhcc-dialog-title">
+        <button type="button" class="nhcc-dialog__close" data-dialog-close aria-label="Close">×</button>
+        <p class="nhcc-dialog__eyebrow">\${escapeHtml(bill.code)} · \${escapeHtml(bill.issueArea || "Tracked bill")}</p>
+        <h3 id="nhcc-dialog-title">\${escapeHtml(bill.name || bill.code)}</h3>
+        \${bill.summary ? \`<p>\${escapeHtml(bill.summary)}</p>\` : ""}
+        \${bill.moreInfoUrl ? \`<p><a href="\${escapeHtml(bill.moreInfoUrl)}" target="_blank" rel="noopener">More information</a></p>\` : ""}
+        <div class="nhcc-impact-grid">
+          <div>
+            <strong>Yea</strong>
+            \${bill.yeaInterpretation ? \`<span>\${escapeHtml(bill.yeaInterpretation)}</span>\` : ""}
+            \${bill.yeaImpact ? \`<p>\${escapeHtml(bill.yeaImpact)}</p>\` : ""}
+          </div>
+          <div>
+            <strong>Nay</strong>
+            \${bill.nayInterpretation ? \`<span>\${escapeHtml(bill.nayInterpretation)}</span>\` : ""}
+            \${bill.nayImpact ? \`<p>\${escapeHtml(bill.nayImpact)}</p>\` : ""}
+          </div>
+        </div>
+      </section>
+    </div>\`;
+  }
+
+  function openBillDialog(root, billCode) {
+    const bill = (root.__nhccBills || []).find((item) => item.code === billCode);
+    if (!bill) return;
+
+    const existing = root.querySelector("[data-dialog-backdrop]");
+    if (existing) existing.remove();
+
+    root.querySelector(".nhcc-widget").insertAdjacentHTML("beforeend", billDialog(bill));
+    root.querySelector("[data-dialog-close]")?.focus();
+  }
+
+  function closeBillDialog(root) {
+    root.querySelector("[data-dialog-backdrop]")?.remove();
   }
 
   function mount(node) {
@@ -357,10 +399,25 @@ function handleVotingWidgetScript(request) {
         .nhcc-votes li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; border-top: 1px solid #edf1f6; padding-top: 8px; }
         .nhcc-votes strong, .nhcc-votes span { display: block; }
         .nhcc-votes div span { color: #526173; font-size: .88rem; }
+        .nhcc-bill-link { display: inline; border: 0; padding: 0; background: transparent; color: #174ea6; font: inherit; font-weight: 800; text-decoration: underline; cursor: pointer; }
+        .nhcc-interpretation { margin-top: 3px; color: #18212f !important; font-weight: 700; }
         .nhcc-vote { border-radius: 999px; padding: 4px 8px; background: #edf1f6; color: #344255; font-size: .82rem; white-space: nowrap; }
         .nhcc-vote--yea { background: #e7f5ee; color: #146c43; }
         .nhcc-vote--nay { background: #fdecec; color: #b42318; }
+        .nhcc-dialog-backdrop { position: fixed; inset: 0; z-index: 2147483000; display: grid; place-items: center; padding: 16px; background: rgba(24, 33, 47, .46); }
+        .nhcc-dialog { position: relative; width: min(680px, 100%); max-height: min(760px, calc(100vh - 32px)); overflow: auto; border-radius: 8px; background: #fff; padding: 18px; box-shadow: 0 20px 70px rgba(24, 33, 47, .32); }
+        .nhcc-dialog h3 { margin: 0 32px 10px 0; font-size: 1.2rem; line-height: 1.25; }
+        .nhcc-dialog p { color: #344255; line-height: 1.45; }
+        .nhcc-dialog a { color: #174ea6; font-weight: 700; }
+        .nhcc-dialog__eyebrow { margin: 0 32px 6px 0; color: #526173 !important; font-size: .86rem; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; }
+        .nhcc-dialog__close { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border: 1px solid #d7dee8; border-radius: 50%; background: #fff; color: #18212f; font-size: 1.35rem; line-height: 1; cursor: pointer; }
+        .nhcc-impact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+        .nhcc-impact-grid div { border: 1px solid #e1e7ef; border-radius: 8px; padding: 12px; }
+        .nhcc-impact-grid strong { display: block; margin-bottom: 4px; }
+        .nhcc-impact-grid span { display: block; color: #18212f; font-weight: 800; }
+        .nhcc-impact-grid p { margin: 8px 0 0; font-size: .92rem; }
         @media (max-width: 560px) { .nhcc-form { flex-direction: column; } .nhcc-votes li { grid-template-columns: 1fr; } }
+        @media (max-width: 560px) { .nhcc-impact-grid { grid-template-columns: 1fr; } }
       </style>
       <section class="nhcc-widget">
         <h2>\${escapeHtml(config.title)}</h2>
@@ -396,6 +453,22 @@ function handleVotingWidgetScript(request) {
       } finally {
         button.disabled = false;
       }
+    });
+
+    root.addEventListener("click", (event) => {
+      const billButton = event.target.closest?.("[data-bill-code]");
+      if (billButton) {
+        openBillDialog(root, billButton.dataset.billCode);
+        return;
+      }
+
+      if (event.target.closest?.("[data-dialog-close]") || event.target.dataset?.dialogBackdrop !== undefined) {
+        closeBillDialog(root);
+      }
+    });
+
+    root.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeBillDialog(root);
     });
   }
 
@@ -534,6 +607,10 @@ function parseBillTrackerCsv(csvText) {
         moreInfoUrl: record.MoreInfoURL || "",
         issueArea: record["Issue Area"] || "",
         articles: record.Articles || "",
+        yeaInterpretation: record["Yea Interpretation"] || "",
+        nayInterpretation: record["Nay Interpretation"] || "",
+        yeaImpact: record["Yea Impact"] || "",
+        nayImpact: record["Nay Impact"] || "",
         testimonySupporting: record["Testimony Supporting"] || "",
         testimonyOpposed: record["Testimony Opposed"] || "",
       };
@@ -607,9 +684,24 @@ async function attachTrackedBillVotes(env, representatives, bills) {
       trackedVotes: bills.map((bill) => ({
         bill,
         vote: repVotes.get(bill.code) || null,
+        interpretation: getVoteInterpretation(bill, repVotes.get(bill.code)),
       })),
     };
   });
+}
+
+function getVoteInterpretation(bill, vote) {
+  if (!vote) return "";
+
+  if (vote.vote === "yea") {
+    return bill.yeaInterpretation || "";
+  }
+
+  if (vote.vote === "nay") {
+    return bill.nayInterpretation || "";
+  }
+
+  return "";
 }
 
 async function getTrackedVotes(env, employeenos, billCodes) {
