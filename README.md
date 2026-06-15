@@ -56,6 +56,28 @@ npm run dry-run
 - `GET /candidates/{slug-or-filer-entity-number}`: returns one candidate.
 - `POST /reps/lookup`: returns civic district matches, representatives, grouped representatives, and matching candidates for the address.
   - `candidateYear=<year>` defaults to `2026`
+- `GET /widgets/voting-info.js`: embeddable partner widget script for address-based voting records.
+- `POST /widgets/voting-info/lookup`: combines address lookup, a published Google Sheets bill tracker CSV, and representative roll-call votes.
+
+## Partner voting widget
+
+Partners can embed the widget with a placeholder element and the hosted script:
+
+```html
+<div
+  data-nhcc-voting-widget
+  data-bill-tracker-url="https://docs.google.com/spreadsheets/d/e/2PACX-1vTHKkGGONM78RXb63Igvi2BXipOA4pV4X5CBY6yHaVAizO-l0q_WtU8uyXI-vhxxbKEib9nFlL1nIBz/pub?gid=1337871563&single=true&output=csv"
+></div>
+<script src="https://api.nhciviccommons.com/widgets/voting-info.js" defer></script>
+```
+
+Optional data attributes:
+
+- `data-api-base`: API origin, defaults to the script origin.
+- `data-title`: widget heading.
+- `data-button-text`: submit button label.
+
+The CSV must include a `Code` column with bill numbers such as `HB238`.
 
 ## Required Cloudflare bindings
 

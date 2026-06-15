@@ -4,6 +4,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, x-admin-secret",
 };
 
+const DEFAULT_BILL_TRACKER_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTHKkGGONM78RXb63Igvi2BXipOA4pV4X5CBY6yHaVAizO-l0q_WtU8uyXI-vhxxbKEib9nFlL1nIBz/pub?gid=1337871563&single=true&output=csv";
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
     status,
@@ -42,6 +45,8 @@ export default {
           "/reps/lookup",
           "/reps/{employeeno}/votes",
           "/bills",
+          "/widgets/voting-info.js",
+          "/widgets/voting-info/lookup",
           "/events",
           "/admin/sync-legislator-photos",
         ],
@@ -79,6 +84,14 @@ export default {
           status: "planned",
         },
       ]);
+    }
+
+    if (url.pathname === "/widgets/voting-info.js") {
+      return handleVotingWidgetScript(request);
+    }
+
+    if (url.pathname === "/widgets/voting-info/lookup") {
+      return handleVotingWidgetLookup(request, env);
     }
 
     if (url.pathname === "/communities") {
@@ -172,6 +185,389 @@ export default {
     return json({ error: "Not found" }, 404);
   },
 };
+
+function javascript(source) {
+  return new Response(source, {
+    headers: {
+      "Content-Type": "application/javascript; charset=utf-8",
+      "Cache-Control": "public, max-age=300",
+      ...corsHeaders,
+    },
+  });
+}
+
+function handleVotingWidgetScript(request) {
+  const origin = new URL(request.url).origin;
+
+  return javascript(`(() => {
+  const currentScript = document.currentScript;
+  const defaultApiBase = ${JSON.stringify(origin)};
+  const defaultTrackerUrl = ${JSON.stringify(DEFAULT_BILL_TRACKER_URL)};
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function attrs(node) {
+    return {
+      apiBase: node.dataset.apiBase || currentScript?.dataset.apiBase || defaultApiBase,
+      trackerUrl: node.dataset.billTrackerUrl || currentScript?.dataset.billTrackerUrl || defaultTrackerUrl,
+      title: node.dataset.title || currentScript?.dataset.title || "How did my representatives vote?",
+      buttonText: node.dataset.buttonText || currentScript?.dataset.buttonText || "Find my representatives"
+    };
+  }
+
+  function repCard(rep) {
+    const votes = (rep.trackedVotes || []).map((item) => {
+      const vote = item.vote ? escapeHtml(item.vote.vote) : "No recorded vote";
+      const voteClass = item.vote ? "nhcc-vote nhcc-vote--" + escapeHtml(item.vote.vote) : "nhcc-vote";
+      return \`<li>
+        <div>
+          <strong>\${escapeHtml(item.bill.code)}</strong>
+          <span>\${escapeHtml(item.bill.name || item.bill.summary || "")}</span>
+        </div>
+        <span class="\${voteClass}">\${vote}</span>
+      </li>\`;
+    }).join("");
+
+    return \`<article class="nhcc-rep">
+      <div class="nhcc-rep__header">
+        \${rep.photo ? \`<img src="\${escapeHtml(rep.photo)}" alt="">\` : ""}
+        <div>
+          <h3>\${escapeHtml(rep.name)}</h3>
+          <p>\${escapeHtml(rep.chamber)} \${escapeHtml(rep.district || "")} · \${escapeHtml(rep.party || "")}</p>
+        </div>
+      </div>
+      <ul class="nhcc-votes">\${votes}</ul>
+    </article>\`;
+  }
+
+  function renderResults(root, data) {
+    const reps = data.representatives || [];
+    root.querySelector("[data-results]").innerHTML = \`
+      <div class="nhcc-summary">
+        <strong>\${escapeHtml(data.address)}</strong>
+        <span>\${reps.length} representatives found · \${(data.bills || []).length} tracked bills</span>
+      </div>
+      <div class="nhcc-grid">\${reps.map(repCard).join("")}</div>
+    \`;
+  }
+
+  function mount(node) {
+    if (node.__nhccMounted) return;
+    node.__nhccMounted = true;
+    const config = attrs(node);
+    const root = node.attachShadow ? node.attachShadow({ mode: "open" }) : node;
+
+    root.innerHTML = \`
+      <style>
+        :host, .nhcc-widget { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18212f; }
+        .nhcc-widget { border: 1px solid #d7dee8; border-radius: 8px; padding: 16px; background: #fff; max-width: 760px; }
+        .nhcc-widget h2 { margin: 0 0 12px; font-size: 1.15rem; line-height: 1.25; }
+        .nhcc-form { display: flex; gap: 8px; align-items: stretch; }
+        .nhcc-form input { flex: 1; min-width: 0; border: 1px solid #b8c3d2; border-radius: 6px; padding: 10px 12px; font: inherit; }
+        .nhcc-form button { border: 0; border-radius: 6px; padding: 10px 12px; font: inherit; font-weight: 700; background: #174ea6; color: #fff; cursor: pointer; }
+        .nhcc-form button:disabled { opacity: .65; cursor: wait; }
+        .nhcc-status { margin: 10px 0 0; color: #526173; font-size: .92rem; }
+        .nhcc-summary { margin: 16px 0 10px; display: flex; flex-direction: column; gap: 2px; }
+        .nhcc-summary span { color: #526173; font-size: .92rem; }
+        .nhcc-grid { display: grid; gap: 12px; }
+        .nhcc-rep { border: 1px solid #e1e7ef; border-radius: 8px; padding: 12px; }
+        .nhcc-rep__header { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+        .nhcc-rep__header img { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; background: #edf1f6; }
+        .nhcc-rep h3 { margin: 0; font-size: 1rem; }
+        .nhcc-rep p { margin: 2px 0 0; color: #526173; font-size: .9rem; }
+        .nhcc-votes { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+        .nhcc-votes li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; border-top: 1px solid #edf1f6; padding-top: 8px; }
+        .nhcc-votes strong, .nhcc-votes span { display: block; }
+        .nhcc-votes div span { color: #526173; font-size: .88rem; }
+        .nhcc-vote { border-radius: 999px; padding: 4px 8px; background: #edf1f6; color: #344255; font-size: .82rem; white-space: nowrap; }
+        .nhcc-vote--yea { background: #e7f5ee; color: #146c43; }
+        .nhcc-vote--nay { background: #fdecec; color: #b42318; }
+        @media (max-width: 560px) { .nhcc-form { flex-direction: column; } .nhcc-votes li { grid-template-columns: 1fr; } }
+      </style>
+      <section class="nhcc-widget">
+        <h2>\${escapeHtml(config.title)}</h2>
+        <form class="nhcc-form">
+          <input name="address" autocomplete="street-address" placeholder="Enter your NH address" required>
+          <button type="submit">\${escapeHtml(config.buttonText)}</button>
+        </form>
+        <p class="nhcc-status" data-status></p>
+        <div data-results></div>
+      </section>\`;
+
+    const form = root.querySelector("form");
+    const status = root.querySelector("[data-status]");
+    const button = root.querySelector("button");
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const address = new FormData(form).get("address");
+      button.disabled = true;
+      status.textContent = "Looking up voting records...";
+      try {
+        const response = await fetch(config.apiBase.replace(/\\/$/, "") + "/widgets/voting-info/lookup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ address, billTrackerUrl: config.trackerUrl })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Lookup failed.");
+        status.textContent = "";
+        renderResults(root, data);
+      } catch (error) {
+        status.textContent = error.message || "Unable to load voting records.";
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+
+  function mountAll() {
+    document.querySelectorAll("[data-nhcc-voting-widget]").forEach(mount);
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mountAll);
+  else mountAll();
+})();`);
+}
+
+async function handleVotingWidgetLookup(request, env) {
+  try {
+    if (request.method !== "POST") {
+      return json({ error: "Method not allowed. Use POST." }, 405);
+    }
+
+    const body = await request.json();
+    const address = String(body.address || "").trim();
+    const billTrackerUrl = String(
+      body.billTrackerUrl || DEFAULT_BILL_TRACKER_URL
+    ).trim();
+
+    if (!address) {
+      return json({ error: "Address is required." }, 400);
+    }
+
+    const trackerUrl = validateBillTrackerUrl(billTrackerUrl);
+    const [lookupResponse, bills] = await Promise.all([
+      handleAddressLookup(
+        new Request(request.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ address }),
+        }),
+        env
+      ),
+      fetchBillTracker(trackerUrl),
+    ]);
+
+    const lookup = await lookupResponse.json();
+
+    if (!lookupResponse.ok) {
+      return json(lookup, lookupResponse.status);
+    }
+
+    const representatives = await attachTrackedBillVotes(
+      env,
+      lookup.representatives || [],
+      bills
+    );
+
+    return json({
+      address,
+      normalizedInput: lookup.normalizedInput || null,
+      representatives,
+      groups: {
+        senate: representatives.filter((rep) => rep.chamber === "Senate"),
+        house: representatives.filter((rep) => rep.chamber === "House"),
+      },
+      bills,
+      meta: {
+        billTrackerUrl: trackerUrl,
+        billCount: bills.length,
+      },
+    });
+  } catch (error) {
+    return json(
+      {
+        error: error.message || "Unable to load voting information.",
+      },
+      500
+    );
+  }
+}
+
+function validateBillTrackerUrl(value) {
+  const url = new URL(value);
+
+  if (!["https:", "http:"].includes(url.protocol)) {
+    throw new Error("billTrackerUrl must be an http(s) URL.");
+  }
+
+  return url.toString();
+}
+
+async function fetchBillTracker(url) {
+  const response = await fetch(url, {
+    headers: { Accept: "text/csv,text/plain,*/*" },
+  });
+
+  if (!response.ok) {
+    throw new Error("Unable to fetch bill tracker CSV.");
+  }
+
+  return parseBillTrackerCsv(await response.text());
+}
+
+function parseBillTrackerCsv(csvText) {
+  const rows = parseCsv(csvText);
+  const headers = rows.shift() || [];
+
+  return rows
+    .map((row) => {
+      const record = Object.fromEntries(
+        headers.map((header, index) => [header.trim(), row[index] || ""])
+      );
+      const code = normalizeBillNumber(record.Code);
+
+      if (!code) return null;
+
+      return {
+        code,
+        name: record.Name || code,
+        summary: record.Summary || "",
+        impact: record.Impact || "",
+        moreInfoUrl: record.MoreInfoURL || "",
+        issueArea: record["Issue Area"] || "",
+        articles: record.Articles || "",
+        testimonySupporting: record["Testimony Supporting"] || "",
+        testimonyOpposed: record["Testimony Opposed"] || "",
+      };
+    })
+    .filter(Boolean);
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (text[index + 1] === '"') {
+          field += '"';
+          index += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += char;
+      }
+    } else if (char === '"') {
+      inQuotes = true;
+    } else if (char === ",") {
+      row.push(field);
+      field = "";
+    } else if (char === "\\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else if (char !== "\\r") {
+      field += char;
+    }
+  }
+
+  if (field || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+async function attachTrackedBillVotes(env, representatives, bills) {
+  const billCodes = bills.map((bill) => bill.code).filter(Boolean);
+  const employeenos = representatives
+    .map((rep) => rep.employeeno)
+    .filter(Boolean);
+
+  if (!billCodes.length || !employeenos.length) {
+    return representatives.map((rep) => ({
+      ...rep,
+      trackedVotes: bills.map((bill) => ({ bill, vote: null })),
+    }));
+  }
+
+  const votes = await getTrackedVotes(env, employeenos, billCodes);
+
+  return representatives.map((rep) => {
+    const repVotes = votes.get(String(rep.employeeno)) || new Map();
+
+    return {
+      ...rep,
+      trackedVotes: bills.map((bill) => ({
+        bill,
+        vote: repVotes.get(bill.code) || null,
+      })),
+    };
+  });
+}
+
+async function getTrackedVotes(env, employeenos, billCodes) {
+  const result = await env.DB.prepare(`
+    SELECT
+      h.employeenumber,
+      h.sessionyear,
+      h.legislativebody,
+      h.votesequencenumber,
+      h.condensedbillno,
+      h.vote AS vote_code,
+      CASE h.vote
+        WHEN 1 THEN 'yea'
+        WHEN 2 THEN 'nay'
+        WHEN 3 THEN 'absent'
+        WHEN 4 THEN 'present'
+        WHEN 5 THEN 'other_not_voting'
+        WHEN 6 THEN 'other_present_not_voting'
+        WHEN 7 THEN 'other_present_not_voting'
+        WHEN 0 THEN 'other_not_counted'
+        ELSE 'unknown'
+      END AS vote,
+      rs.question_motion
+    FROM d1_rollcallhistory h
+    LEFT JOIN d1_rollcallsummary rs
+      ON rs.sessionyear = h.sessionyear
+      AND rs.legislativebody = h.legislativebody
+      AND rs.votesequencenumber = h.votesequencenumber
+    WHERE h.employeenumber IN (${employeenos.map(() => "?").join(", ")})
+      AND UPPER(h.condensedbillno) IN (${billCodes.map(() => "?").join(", ")})
+    ORDER BY h.sessionyear DESC, h.votesequencenumber DESC
+  `)
+    .bind(...employeenos, ...billCodes)
+    .all();
+
+  const votes = new Map();
+
+  for (const vote of result.results || []) {
+    const repKey = String(vote.employeenumber);
+    const billKey = normalizeBillNumber(vote.condensedbillno);
+
+    if (!votes.has(repKey)) votes.set(repKey, new Map());
+    if (!votes.get(repKey).has(billKey)) votes.get(repKey).set(billKey, vote);
+  }
+
+  return votes;
+}
 
 
 async function handleRepProfile(request, env) {
@@ -793,6 +1189,7 @@ function senateCommunityCoversHouseCommunity(senateCommunity, houseCommunity) {
 function getCommunityWardNumbers(value) {
   const normalized = String(value || "")
     .replace(/^Mancheseter\b/i, "Manchester")
+    .replace(/-/g, " ")
     .toLowerCase();
   const wardMatch = normalized.match(/\bwards?\s+(.+)$/i);
 
@@ -1238,7 +1635,7 @@ function getCountyTownName(value) {
   const town = String(value || "")
     .trim()
     .replace(/^Mancheseter\b/i, "Manchester")
-    .replace(/\s+wards?\s+\d+.*$/i, "")
+    .replace(/[-\s]+wards?\s+\d+.*$/i, "")
     .replace(/\s+/g, " ")
     .trim();
 
