@@ -57,6 +57,7 @@ npm run dry-run
 - `POST /reps/lookup`: returns civic district matches, representatives, grouped representatives, and matching candidates for the address.
   - `candidateYear=<year>` defaults to `2026`
 - `GET /widgets/voting-info.js`: embeddable partner widget script for address-based voting records.
+- `GET /widgets/voting-info`: iframe-friendly voting widget page for platforms that strip or delay scripts.
 - `POST /widgets/voting-info/lookup`: combines address lookup, a published Google Sheets bill tracker CSV, and representative roll-call votes.
 
 ## Partner voting widget
@@ -69,6 +70,26 @@ Partners can embed the widget with a placeholder element and the hosted script:
   data-bill-tracker-url="https://docs.google.com/spreadsheets/d/e/2PACX-1vTHKkGGONM78RXb63Igvi2BXipOA4pV4X5CBY6yHaVAizO-l0q_WtU8uyXI-vhxxbKEib9nFlL1nIBz/pub?gid=1337871563&single=true&output=csv"
 ></div>
 <script src="https://api.nhciviccommons.com/widgets/voting-info.js" defer></script>
+```
+
+For Shopify sections, the iframe embed is usually more reliable:
+
+```html
+<iframe
+  src="https://api.nhciviccommons.com/widgets/voting-info?billTrackerUrl=https%3A%2F%2Fdocs.google.com%2Fspreadsheets%2Fd%2Fe%2F2PACX-1vTHKkGGONM78RXb63Igvi2BXipOA4pV4X5CBY6yHaVAizO-l0q_WtU8uyXI-vhxxbKEib9nFlL1nIBz%2Fpub%3Fgid%3D1337871563%26single%3Dtrue%26output%3Dcsv"
+  style="width: 100%; min-height: 760px; border: 0;"
+  loading="lazy"
+></iframe>
+```
+
+If a partner can only paste one script tag, the script can create its own widget container:
+
+```html
+<script
+  src="https://api.nhciviccommons.com/widgets/voting-info.js"
+  data-nhcc-voting-widget
+  data-bill-tracker-url="https://docs.google.com/spreadsheets/d/e/2PACX-1vTHKkGGONM78RXb63Igvi2BXipOA4pV4X5CBY6yHaVAizO-l0q_WtU8uyXI-vhxxbKEib9nFlL1nIBz/pub?gid=1337871563&single=true&output=csv"
+></script>
 ```
 
 Optional data attributes:

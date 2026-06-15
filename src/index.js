@@ -17,6 +17,25 @@ function json(data, status = 200) {
   });
 }
 
+function html(source) {
+  return new Response(source, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=300",
+      ...corsHeaders,
+    },
+  });
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -45,6 +64,7 @@ export default {
           "/reps/lookup",
           "/reps/{employeeno}/votes",
           "/bills",
+          "/widgets/voting-info",
           "/widgets/voting-info.js",
           "/widgets/voting-info/lookup",
           "/events",
@@ -84,6 +104,10 @@ export default {
           status: "planned",
         },
       ]);
+    }
+
+    if (url.pathname === "/widgets/voting-info") {
+      return handleVotingWidgetPage(request);
     }
 
     if (url.pathname === "/widgets/voting-info.js") {
@@ -196,6 +220,41 @@ function javascript(source) {
   });
 }
 
+function handleVotingWidgetPage(request) {
+  const url = new URL(request.url);
+  const trackerUrl =
+    url.searchParams.get("billTrackerUrl") ||
+    url.searchParams.get("tracker") ||
+    DEFAULT_BILL_TRACKER_URL;
+  const title =
+    url.searchParams.get("title") || "How did my representatives vote?";
+  const buttonText =
+    url.searchParams.get("buttonText") || "Find my representatives";
+
+  return html(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: transparent; }
+    body { min-height: 100vh; }
+    [data-nhcc-voting-widget] { display: block; }
+  </style>
+</head>
+<body>
+  <div
+    data-nhcc-voting-widget
+    data-bill-tracker-url="${escapeHtml(trackerUrl)}"
+    data-title="${escapeHtml(title)}"
+    data-button-text="${escapeHtml(buttonText)}"
+  ></div>
+  <script src="/widgets/voting-info.js"></script>
+</body>
+</html>`);
+}
+
 function handleVotingWidgetScript(request) {
   const origin = new URL(request.url).origin;
 
@@ -220,6 +279,18 @@ function handleVotingWidgetScript(request) {
       title: node.dataset.title || currentScript?.dataset.title || "How did my representatives vote?",
       buttonText: node.dataset.buttonText || currentScript?.dataset.buttonText || "Find my representatives"
     };
+  }
+
+  function ensureContainer() {
+    if (document.querySelector("[data-nhcc-voting-widget]")) return;
+    if (!currentScript?.hasAttribute("data-nhcc-voting-widget") && !currentScript?.dataset.billTrackerUrl) return;
+
+    const node = document.createElement("div");
+    node.dataset.nhccVotingWidget = "";
+    for (const key of ["apiBase", "billTrackerUrl", "title", "buttonText"]) {
+      if (currentScript.dataset[key]) node.dataset[key] = currentScript.dataset[key];
+    }
+    currentScript.insertAdjacentElement("beforebegin", node);
   }
 
   function repCard(rep) {
@@ -329,11 +400,26 @@ function handleVotingWidgetScript(request) {
   }
 
   function mountAll() {
+    ensureContainer();
     document.querySelectorAll("[data-nhcc-voting-widget]").forEach(mount);
   }
 
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mountAll);
-  else mountAll();
+  function observeMounts() {
+    if (!document.body || !window.MutationObserver) return;
+
+    const observer = new MutationObserver(() => mountAll());
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      mountAll();
+      observeMounts();
+    });
+  } else {
+    mountAll();
+    observeMounts();
+  }
 })();`);
 }
 
