@@ -293,43 +293,167 @@ function handleVotingWidgetScript(request) {
     currentScript.insertAdjacentElement("beforebegin", node);
   }
 
-  function repCard(rep) {
-    const votes = (rep.trackedVotes || []).map((item) => {
-      const vote = item.vote ? escapeHtml(item.vote.vote) : "No recorded vote";
-      const voteClass = item.vote ? "nhcc-vote nhcc-vote--" + escapeHtml(item.vote.vote) : "nhcc-vote";
-      const interpretation = item.interpretation ? \`<span class="nhcc-interpretation">\${escapeHtml(item.interpretation)}</span>\` : "";
-      return \`<li>
-        <div>
-          <button type="button" class="nhcc-bill-link" data-bill-code="\${escapeHtml(item.bill.code)}">\${escapeHtml(item.bill.code)}</button>
-          <span>\${escapeHtml(item.bill.name || item.bill.summary || "")}</span>
-          \${interpretation}
-        </div>
-        <span class="\${voteClass}">\${vote}</span>
-      </li>\`;
-    }).join("");
+  function getTone(text) {
+    const lower = String(text || "").toLowerCase();
+    if (lower.startsWith("pro-") || lower.includes(" pro-") || lower.includes(" pro ")) return "pro";
+    if (lower.startsWith("anti-") || lower.includes(" anti-") || lower.includes(" anti ")) return "anti";
+    return "mix";
+  }
 
-    return \`<article class="nhcc-rep">
-      <div class="nhcc-rep__header">
-        \${rep.photo ? \`<img src="\${escapeHtml(rep.photo)}" alt="">\` : ""}
+  function percentToLetter(pct) {
+    if (pct >= 90) return "A";
+    if (pct >= 80) return "B";
+    if (pct >= 70) return "C";
+    if (pct >= 60) return "D";
+    return "F";
+  }
+
+  function calcGradeStats(votes) {
+    let pro = 0;
+    let anti = 0;
+
+    for (const item of votes || []) {
+      const tone = getTone(item.interpretation);
+      if (tone === "pro") pro += 1;
+      if (tone === "anti") anti += 1;
+    }
+
+    const counted = pro + anti;
+    const pct = counted ? Math.round((pro / counted) * 100) : 0;
+
+    return {
+      pro,
+      anti,
+      counted,
+      pct,
+      letter: counted ? percentToLetter(pct) : "—"
+    };
+  }
+
+  function getIssueList(bills) {
+    const issues = new Set();
+    for (const bill of bills || []) {
+      String(bill.issueArea || "")
+        .split(",")
+        .map((issue) => issue.trim())
+        .filter(Boolean)
+        .forEach((issue) => issues.add(issue));
+    }
+    return [...issues].sort((a, b) => a.localeCompare(b));
+  }
+
+  function voteMatchesIssue(item, issue) {
+    if (!issue) return true;
+    return String(item.bill?.issueArea || "")
+      .split(",")
+      .map((value) => value.trim())
+      .includes(issue);
+  }
+
+  function renderVoteTags(rep, issue) {
+    const votes = (rep.trackedVotes || []).filter((item) => voteMatchesIssue(item, issue));
+
+    if (!votes.length) {
+      return \`<p class="nhcc-empty">No tracked votes match this issue filter.</p>\`;
+    }
+
+    return \`<div class="nhcc-vote-tags">\${votes.map((item) => {
+      const vote = item.vote ? escapeHtml(item.vote.vote) : "No recorded vote";
+      const tone = getTone(item.interpretation);
+      return \`<button
+        type="button"
+        class="nhcc-vote-tag"
+        data-bill-code="\${escapeHtml(item.bill.code)}"
+        data-tone="\${escapeHtml(tone)}"
+      >
+        <strong>\${escapeHtml(item.bill.code)}</strong>
+        <span>\${vote}</span>
+        \${item.interpretation ? \`<em>\${escapeHtml(item.interpretation)}</em>\` : ""}
+      </button>\`;
+    }).join("")}</div>\`;
+  }
+
+  function renderRepCard(root, repIndex) {
+    const data = root.__nhccData || {};
+    const reps = data.representatives || [];
+    const rep = reps[Number(repIndex)];
+    const card = root.querySelector("[data-rep-card]");
+
+    if (!rep) {
+      card.className = "nhcc-rep-card nhcc-rep-card--empty";
+      card.innerHTML = "<p>Select a legislator to view their voting record.</p>";
+      return;
+    }
+
+    const issue = root.querySelector("[data-issue-filter]")?.value || "";
+    const visibleVotes = (rep.trackedVotes || []).filter((item) => voteMatchesIssue(item, issue));
+    const stats = calcGradeStats(visibleVotes);
+    const photo = rep.photo ? \`<img class="nhcc-rep-photo" src="\${escapeHtml(rep.photo)}" alt="">\` : "";
+
+    card.className = "nhcc-rep-card";
+    card.innerHTML = \`
+      <div class="nhcc-rep-main">
+        \${photo}
         <div>
           <h3>\${escapeHtml(rep.name)}</h3>
           <p>\${escapeHtml(rep.chamber)} \${escapeHtml(rep.district || "")} · \${escapeHtml(rep.party || "")}</p>
+          \${rep.email ? \`<p><a href="mailto:\${escapeHtml(rep.email)}">\${escapeHtml(rep.email)}</a></p>\` : ""}
         </div>
       </div>
-      <ul class="nhcc-votes">\${votes}</ul>
-    </article>\`;
+      <div class="nhcc-grade">
+        <span>Alignment grade\${issue ? " · " + escapeHtml(issue) : ""}</span>
+        <strong data-grade="\${escapeHtml(stats.letter)}">\${escapeHtml(stats.letter)}</strong>
+        <p>\${stats.counted ? escapeHtml(String(stats.pct)) + "% aligned based on " + escapeHtml(String(stats.counted)) + " scored votes" : "Not enough scored votes for this filter"}</p>
+      </div>
+      <div class="nhcc-vote-label">Tap a vote to see what it means.</div>
+      \${renderVoteTags(rep, issue)}
+    \`;
   }
 
   function renderResults(root, data) {
     const reps = data.representatives || [];
     root.__nhccBills = data.bills || [];
-    root.querySelector("[data-results]").innerHTML = \`
-      <div class="nhcc-summary">
-        <strong>\${escapeHtml(data.address)}</strong>
-        <span>\${reps.length} representatives found · \${(data.bills || []).length} tracked bills</span>
-      </div>
-      <div class="nhcc-grid">\${reps.map(repCard).join("")}</div>
+    root.__nhccData = data;
+
+    root.querySelector("[data-summary]").innerHTML = \`
+      <strong>\${escapeHtml(data.normalizedInput?.line1 || data.address)}</strong>
+      <span>\${reps.length} legislators found · \${(data.bills || []).length} tracked bills</span>
     \`;
+
+    const divisions = root.querySelector("[data-divisions]");
+    const groupMarkup = (label, group) => {
+      const people = group || [];
+      return \`<div class="nhcc-division">
+        <div>
+          <strong>\${escapeHtml(label)}</strong>
+          <span>\${people.length ? "Who represents you" : "No matches found"}</span>
+        </div>
+        <div class="nhcc-pill-list">\${people.map((rep) => {
+          const index = reps.findIndex((item) => item.employeeno === rep.employeeno);
+          return \`<button type="button" class="nhcc-rep-pill" data-rep-index="\${index}">
+            \${rep.photo ? \`<img src="\${escapeHtml(rep.photo)}" alt="">\` : ""}
+            <span>\${escapeHtml(rep.name)}</span>
+          </button>\`;
+        }).join("")}</div>
+      </div>\`;
+    };
+    divisions.innerHTML = [
+      groupMarkup("State Senator", data.groups?.senate || []),
+      groupMarkup("State House Representatives", data.groups?.house || [])
+    ].join("");
+
+    const issueFilter = root.querySelector("[data-issue-filter]");
+    issueFilter.innerHTML = \`<option value="">All issues</option>\` + getIssueList(data.bills)
+      .map((issue) => \`<option value="\${escapeHtml(issue)}">\${escapeHtml(issue)}</option>\`)
+      .join("");
+
+    const repSelect = root.querySelector("[data-rep-select]");
+    repSelect.innerHTML = \`<option value="">Search or select a name</option>\` + reps
+      .map((rep, index) => \`<option value="\${index}">\${escapeHtml(rep.name)} — \${escapeHtml(rep.chamber)}</option>\`)
+      .join("");
+
+    root.querySelector("[data-rep-tool]").hidden = false;
+    renderRepCard(root, "");
   }
 
   function billDialog(bill) {
@@ -380,8 +504,12 @@ function handleVotingWidgetScript(request) {
     root.innerHTML = \`
       <style>
         :host, .nhcc-widget { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18212f; }
-        .nhcc-widget { border: 1px solid #d7dee8; border-radius: 8px; padding: 16px; background: #fff; max-width: 760px; }
-        .nhcc-widget h2 { margin: 0 0 12px; font-size: 1.15rem; line-height: 1.25; }
+        .nhcc-widget { border: 1px solid rgba(148, 163, 253, .18); border-radius: 18px; padding: 16px; background: #fff; max-width: 900px; box-shadow: 0 8px 24px rgba(15, 23, 42, .06); }
+        .nhcc-widget h2, .nhcc-widget h3 { margin: 0 0 6px; line-height: 1.25; }
+        .nhcc-widget h2 { font-size: 1.25rem; }
+        .nhcc-widget h3 { font-size: 1.05rem; }
+        .nhcc-widget p { margin: 0; }
+        .nhcc-intro { margin-bottom: 12px; color: #526173; font-size: .92rem; line-height: 1.42; }
         .nhcc-form { display: flex; gap: 8px; align-items: stretch; }
         .nhcc-form input { flex: 1; min-width: 0; border: 1px solid #b8c3d2; border-radius: 6px; padding: 10px 12px; font: inherit; }
         .nhcc-form button { border: 0; border-radius: 6px; padding: 10px 12px; font: inherit; font-weight: 700; background: #174ea6; color: #fff; cursor: pointer; }
@@ -389,18 +517,42 @@ function handleVotingWidgetScript(request) {
         .nhcc-status { margin: 10px 0 0; color: #526173; font-size: .92rem; }
         .nhcc-summary { margin: 16px 0 10px; display: flex; flex-direction: column; gap: 2px; }
         .nhcc-summary span { color: #526173; font-size: .92rem; }
-        .nhcc-grid { display: grid; gap: 12px; }
-        .nhcc-rep { border: 1px solid #e1e7ef; border-radius: 8px; padding: 12px; }
-        .nhcc-rep__header { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
-        .nhcc-rep__header img { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; background: #edf1f6; }
-        .nhcc-rep h3 { margin: 0; font-size: 1rem; }
-        .nhcc-rep p { margin: 2px 0 0; color: #526173; font-size: .9rem; }
-        .nhcc-votes { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-        .nhcc-votes li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; border-top: 1px solid #edf1f6; padding-top: 8px; }
-        .nhcc-votes strong, .nhcc-votes span { display: block; }
-        .nhcc-votes div span { color: #526173; font-size: .88rem; }
-        .nhcc-bill-link { display: inline; border: 0; padding: 0; background: transparent; color: #174ea6; font: inherit; font-weight: 800; text-decoration: underline; cursor: pointer; }
-        .nhcc-interpretation { margin-top: 3px; color: #18212f !important; font-weight: 700; }
+        .nhcc-division { margin-top: 8px; padding: 10px; border: 1px solid #e1e7ef; border-radius: 12px; background: #f9fafb; }
+        .nhcc-division > div:first-child { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+        .nhcc-division span { color: #526173; font-size: .86rem; }
+        .nhcc-pill-list { display: flex; flex-wrap: wrap; gap: 8px; }
+        .nhcc-rep-pill { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #e1e7ef; border-radius: 999px; padding: 5px 9px 5px 5px; background: #eef2ff; color: #18212f; cursor: pointer; font: inherit; font-size: .86rem; }
+        .nhcc-rep-pill img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: #edf1f6; }
+        .nhcc-rep-tool { margin-top: 18px; padding-top: 16px; border-top: 1px solid #e1e7ef; }
+        .nhcc-controls { display: grid; gap: 10px; margin: 12px 0; }
+        .nhcc-control { display: grid; gap: 4px; }
+        .nhcc-control label { color: #526173; font-size: .76rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+        .nhcc-control select { width: 100%; border: 1px solid #b8c3d2; border-radius: 8px; padding: 10px 12px; background: #fff; font: inherit; }
+        .nhcc-control--highlight { padding: 12px; border-radius: 12px; border: 1px solid rgba(79, 70, 229, .25); background: #eef2ff; }
+        .nhcc-hint { color: #4338ca; font-size: .84rem; }
+        .nhcc-rep-card { border: 1px solid #e1e7ef; border-radius: 14px; padding: 12px; box-shadow: 0 8px 24px rgba(15, 23, 42, .06); }
+        .nhcc-rep-card--empty { text-align: center; color: #526173; box-shadow: none; }
+        .nhcc-rep-main { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+        .nhcc-rep-photo { width: 84px; height: 84px; border-radius: 12px; object-fit: cover; background: #edf1f6; }
+        .nhcc-rep-main h3 { margin: 0 0 4px; }
+        .nhcc-rep-main p { color: #526173; font-size: .9rem; margin-top: 2px; }
+        .nhcc-rep-main a { color: #174ea6; }
+        .nhcc-grade { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; margin: 10px 0; padding: 10px; border-radius: 12px; border: 1px solid #e1e7ef; background: #f9fafb; }
+        .nhcc-grade span { color: #526173; font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+        .nhcc-grade strong { border-radius: 999px; padding: 6px 10px; background: #edf1f6; font-size: 1.15rem; }
+        .nhcc-grade strong[data-grade="A"], .nhcc-grade strong[data-grade="B"] { background: #dcfce7; color: #166534; }
+        .nhcc-grade strong[data-grade="C"] { background: #fef9c3; color: #854d0e; }
+        .nhcc-grade strong[data-grade="D"] { background: #ffedd5; color: #9a3412; }
+        .nhcc-grade strong[data-grade="F"] { background: #fee2e2; color: #991b1b; }
+        .nhcc-grade p { grid-column: 1 / -1; color: #526173; font-size: .86rem; }
+        .nhcc-vote-label { margin: 12px 0 6px; color: #526173; font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+        .nhcc-vote-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+        .nhcc-vote-tag { display: inline-flex; flex-direction: column; gap: 2px; max-width: 100%; border: 1px solid #e1e7ef; border-radius: 999px; padding: 6px 9px; background: #fff; color: #18212f; cursor: pointer; text-align: left; font: inherit; font-size: .78rem; }
+        .nhcc-vote-tag strong { color: #174ea6; }
+        .nhcc-vote-tag em { color: #18212f; font-style: normal; font-weight: 800; }
+        .nhcc-vote-tag[data-tone="pro"] { background: #ecfdf3; border-color: #bbf7d0; color: #166534; }
+        .nhcc-vote-tag[data-tone="anti"] { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+        .nhcc-empty { color: #526173; font-size: .92rem; }
         .nhcc-vote { border-radius: 999px; padding: 4px 8px; background: #edf1f6; color: #344255; font-size: .82rem; white-space: nowrap; }
         .nhcc-vote--yea { background: #e7f5ee; color: #146c43; }
         .nhcc-vote--nay { background: #fdecec; color: #b42318; }
@@ -420,18 +572,40 @@ function handleVotingWidgetScript(request) {
         @media (max-width: 560px) { .nhcc-impact-grid { grid-template-columns: 1fr; } }
       </style>
       <section class="nhcc-widget">
-        <h2>\${escapeHtml(config.title)}</h2>
+        <h2>Find your districts and state legislators</h2>
+        <p class="nhcc-intro">Enter your full address to see your New Hampshire State Senator and House Representatives, then jump straight to their voting record.</p>
         <form class="nhcc-form">
           <input name="address" autocomplete="street-address" placeholder="Enter your NH address" required>
           <button type="submit">\${escapeHtml(config.buttonText)}</button>
         </form>
         <p class="nhcc-status" data-status></p>
-        <div data-results></div>
+        <div class="nhcc-summary" data-summary></div>
+        <div data-divisions></div>
+        <div class="nhcc-rep-tool" data-rep-tool hidden>
+          <h2>\${escapeHtml(config.title)}</h2>
+          <p class="nhcc-intro">Select a legislator to see key votes. Tap any vote tag to read what that bill does and how the vote is interpreted.</p>
+          <div class="nhcc-controls">
+            <div class="nhcc-control nhcc-control--highlight">
+              <label>Filter by issue</label>
+              <select data-issue-filter><option value="">All issues</option></select>
+              <div class="nhcc-hint">Tip: pick an issue first to quickly scan the votes that matter to you.</div>
+            </div>
+            <div class="nhcc-control">
+              <label>Legislator</label>
+              <select data-rep-select><option value="">Search or select a name</option></select>
+            </div>
+          </div>
+          <div class="nhcc-rep-card nhcc-rep-card--empty" data-rep-card>
+            <p>Select a legislator to view their voting record.</p>
+          </div>
+        </div>
       </section>\`;
 
     const form = root.querySelector("form");
     const status = root.querySelector("[data-status]");
     const button = root.querySelector("button");
+    const repSelect = root.querySelector("[data-rep-select]");
+    const issueFilter = root.querySelector("[data-issue-filter]");
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -455,7 +629,18 @@ function handleVotingWidgetScript(request) {
       }
     });
 
+    repSelect.addEventListener("change", () => renderRepCard(root, repSelect.value));
+    issueFilter.addEventListener("change", () => renderRepCard(root, repSelect.value));
+
     root.addEventListener("click", (event) => {
+      const repPill = event.target.closest?.("[data-rep-index]");
+      if (repPill) {
+        repSelect.value = repPill.dataset.repIndex;
+        renderRepCard(root, repPill.dataset.repIndex);
+        root.querySelector("[data-rep-tool]")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+
       const billButton = event.target.closest?.("[data-bill-code]");
       if (billButton) {
         openBillDialog(root, billButton.dataset.billCode);
