@@ -77,7 +77,7 @@ For Shopify sections, the iframe embed is usually more reliable:
 ```html
 <iframe
   src="https://api.nhciviccommons.com/widgets/voting-info?billTrackerUrl=https%3A%2F%2Fdocs.google.com%2Fspreadsheets%2Fd%2Fe%2F2PACX-1vTHKkGGONM78RXb63Igvi2BXipOA4pV4X5CBY6yHaVAizO-l0q_WtU8uyXI-vhxxbKEib9nFlL1nIBz%2Fpub%3Fgid%3D1337871563%26single%3Dtrue%26output%3Dcsv"
-  style="width: 100%; min-height: 760px; border: 0;"
+  style="width: 100%; height: 1200px; border: 0;"
   loading="lazy"
 ></iframe>
 ```

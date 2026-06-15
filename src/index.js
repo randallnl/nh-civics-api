@@ -239,7 +239,7 @@ function handleVotingWidgetPage(request) {
   <title>${escapeHtml(title)}</title>
   <style>
     html, body { margin: 0; padding: 0; background: transparent; }
-    html, body { overflow: hidden; }
+    html, body { min-height: 1200px; overflow-y: auto; }
     [data-nhcc-voting-widget] { display: block; }
   </style>
 </head>
