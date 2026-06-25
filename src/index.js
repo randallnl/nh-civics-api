@@ -1312,6 +1312,7 @@ async function handleRepProfile(request, env) {
       l.lastname,
       l.middlename,
       l.party,
+      ${isFreeStaterSelectExpression("l.is_free_stater")},
       COALESCE(dm.district_label, l.district) AS district,
       l.district AS raw_district,
       l.countycode,
@@ -2226,6 +2227,7 @@ async function getRepresentativesForDistrict(env, district) {
       l.firstname,
       l.lastname,
       l.party,
+      ${isFreeStaterSelectExpression("l.is_free_stater")},
       COALESCE(p.photo_url, '') AS photo,
       l.emailaddress AS email,
       l.district AS raw_district,
@@ -2377,6 +2379,16 @@ function getCommunityArticleSearchTerms(district) {
 function parseBooleanText(value) {
   if (value === null || value === undefined || value === "") return null;
   return String(value).toLowerCase() === "true";
+}
+
+function isFreeStaterSelectExpression(column) {
+  return `
+    CASE
+      WHEN LOWER(CAST(COALESCE(${column}, '') AS TEXT)) IN ('1', 'true', 'yes', 'y')
+      THEN 'yes'
+      ELSE 'no'
+    END AS is_free_stater
+  `;
 }
 
 function summarizeParties(representatives) {
@@ -2615,8 +2627,11 @@ function candidateSelectColumns(tableAlias = "") {
     "candidate_email",
     "photo_url",
     "slug",
+    isFreeStaterSelectExpression(`${prefix}is_free_stater`),
   ]
-    .map((column) => `${prefix}${column}`)
+    .map((column) =>
+      column.includes(" AS ") ? column : `${prefix}${column}`
+    )
     .join(", ");
 }
 
@@ -2641,6 +2656,8 @@ function formatCandidate(candidate) {
     candidateEmail: candidate.candidate_email,
     photoUrl: candidate.photo_url,
     slug: candidate.slug,
+    is_free_stater: candidate.is_free_stater || "no",
+    isFreeStater: candidate.is_free_stater || "no",
   };
 }
 
@@ -2691,6 +2708,7 @@ async function handleTownSearch(request, env) {
       r.firstname,
       r.lastname,
       r.party,
+      ${isFreeStaterSelectExpression("r.is_free_stater")},
       COALESCE(dm.district_label, r.district) AS district,
       r.district AS raw_district,
       r.countycode,
@@ -3459,6 +3477,7 @@ async function findHouseRepsFromDistrictMappings(env, districts) {
         l.firstname,
         l.lastname,
         l.party,
+        ${isFreeStaterSelectExpression("l.is_free_stater")},
         COALESCE(dm.district_label, l.district) AS district,
         l.district AS raw_district,
         l.countycode,
@@ -3500,6 +3519,7 @@ async function findSenators(env, senate) {
       l.firstname,
       l.lastname,
       l.party,
+      ${isFreeStaterSelectExpression("l.is_free_stater")},
       COALESCE(dm.district_label, l.district) AS district,
       l.district AS raw_district,
       l.countycode,
@@ -3575,6 +3595,7 @@ async function handleRepVotes(request, env) {
       firstname,
       lastname,
       party,
+      ${isFreeStaterSelectExpression("is_free_stater")},
       legislativebody,
       district,
       countycode
