@@ -62,33 +62,31 @@ npm run dry-run
 
 ## Partner voting widget
 
-Partners can embed the widget with a placeholder element and the hosted script:
+### Queerlective
 
-```html
-<div
-  data-nhcc-voting-widget
-  data-bill-tracker-url="https://docs.google.com/spreadsheets/d/e/2PACX-1vTHKkGGONM78RXb63Igvi2BXipOA4pV4X5CBY6yHaVAizO-l0q_WtU8uyXI-vhxxbKEib9nFlL1nIBz/pub?gid=1337871563&single=true&output=csv"
-></div>
-<script src="https://api.nhciviccommons.com/widgets/voting-info.js" defer></script>
-```
+Queerlective is registered with:
 
-For Shopify sections, the iframe embed is usually more reliable:
+- Partner id: `queerlective`
+- Allowed sites: `https://queerlective.com`, `https://www.queerlective.com`
+- Bill tracker: `https://docs.google.com/spreadsheets/d/e/2PACX-1vS_Z1l_JI0JCSS3N-ZKhL0jacp7VOzTdob-TBrwC2at0tvUqubInihjFW9Ydz1GA1WFVkhcq8vPWACs/pub?output=csv`
+
+Iframe embed:
 
 ```html
 <iframe
-  src="https://api.nhciviccommons.com/widgets/voting-info?billTrackerUrl=https%3A%2F%2Fdocs.google.com%2Fspreadsheets%2Fd%2Fe%2F2PACX-1vTHKkGGONM78RXb63Igvi2BXipOA4pV4X5CBY6yHaVAizO-l0q_WtU8uyXI-vhxxbKEib9nFlL1nIBz%2Fpub%3Fgid%3D1337871563%26single%3Dtrue%26output%3Dcsv"
+  src="https://api.nhciviccommons.com/widgets/voting-info?partner=queerlective"
   style="width: 100%; height: 1200px; border: 0;"
   loading="lazy"
 ></iframe>
 ```
 
-If a partner can only paste one script tag, the script can create its own widget container:
+Script embed:
 
 ```html
 <script
   src="https://api.nhciviccommons.com/widgets/voting-info.js"
   data-nhcc-voting-widget
-  data-bill-tracker-url="https://docs.google.com/spreadsheets/d/e/2PACX-1vTHKkGGONM78RXb63Igvi2BXipOA4pV4X5CBY6yHaVAizO-l0q_WtU8uyXI-vhxxbKEib9nFlL1nIBz/pub?gid=1337871563&single=true&output=csv"
+  data-partner="queerlective"
 ></script>
 ```
 
@@ -98,7 +96,7 @@ Optional data attributes:
 - `data-title`: widget heading.
 - `data-button-text`: submit button label.
 
-The CSV must include a `Code` column with bill numbers such as `HB238`.
+Partner bill trackers must include a `Code` column with bill numbers such as `HB238`.
 
 ## Required Cloudflare bindings
 
@@ -107,6 +105,7 @@ The required Cloudflare resource bindings are configured in `wrangler.jsonc`.
 The Worker route is configured as a custom domain for `api.nhciviccommons.com`.
 
 - `DB`: D1 database binding used by the API queries.
+- `CIVIC_COMMONS_DB`: D1 database binding used by the partner widget registry.
 - `LEGISLATOR_PHOTOS`: R2 bucket binding used by `/admin/sync-legislator-photos`.
 
 Set these secrets in Cloudflare:

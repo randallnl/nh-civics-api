@@ -17,12 +17,14 @@ function json(data, status = 200) {
   });
 }
 
-function html(source) {
+function html(source, headers = {}, status = 200) {
   return new Response(source, {
+    status,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "public, max-age=300",
       ...corsHeaders,
+      ...headers,
     },
   });
 }
@@ -107,7 +109,7 @@ export default {
     }
 
     if (url.pathname === "/widgets/voting-info") {
-      return handleVotingWidgetPage(request);
+      return handleVotingWidgetPage(request, env);
     }
 
     if (url.pathname === "/widgets/voting-info.js") {
@@ -220,16 +222,35 @@ function javascript(source) {
   });
 }
 
-function handleVotingWidgetPage(request) {
+async function handleVotingWidgetPage(request, env) {
   const url = new URL(request.url);
+  let partner;
+  try {
+    partner = await resolvePartnerConfig(
+      env,
+      url.searchParams.get("partner"),
+      true
+    );
+  } catch (error) {
+    return html(
+      `<!doctype html><meta charset="utf-8"><p>${escapeHtml(error.message)}</p>`,
+      {},
+      400
+    );
+  }
+
   const trackerUrl =
+    partner.allowedTrackerUrls[0] ||
     url.searchParams.get("billTrackerUrl") ||
-    url.searchParams.get("tracker") ||
-    DEFAULT_BILL_TRACKER_URL;
+    url.searchParams.get("tracker");
   const title =
-    url.searchParams.get("title") || "How did my representatives vote?";
+    url.searchParams.get("title") ||
+    `${partner.name} voting guide`;
   const buttonText =
     url.searchParams.get("buttonText") || "Find my representatives";
+  const frameAncestors = {
+    "Content-Security-Policy": `frame-ancestors ${partner.allowedOrigins.join(" ")}`,
+  };
 
   return html(`<!doctype html>
 <html lang="en">
@@ -246,6 +267,7 @@ function handleVotingWidgetPage(request) {
 <body>
   <div
     data-nhcc-voting-widget
+    data-partner="${escapeHtml(partner.id)}"
     data-bill-tracker-url="${escapeHtml(trackerUrl)}"
     data-title="${escapeHtml(title)}"
     data-button-text="${escapeHtml(buttonText)}"
@@ -265,7 +287,7 @@ function handleVotingWidgetPage(request) {
     })();
   </script>
 </body>
-</html>`);
+</html>`, frameAncestors);
 }
 
 function handleVotingWidgetScript(request) {
@@ -288,6 +310,7 @@ function handleVotingWidgetScript(request) {
   function attrs(node) {
     return {
       apiBase: node.dataset.apiBase || currentScript?.dataset.apiBase || defaultApiBase,
+      partner: node.dataset.partner || currentScript?.dataset.partner || "",
       trackerUrl: node.dataset.billTrackerUrl || currentScript?.dataset.billTrackerUrl || defaultTrackerUrl,
       title: node.dataset.title || currentScript?.dataset.title || "How did my representatives vote?",
       buttonText: node.dataset.buttonText || currentScript?.dataset.buttonText || "Find my representatives"
@@ -300,7 +323,7 @@ function handleVotingWidgetScript(request) {
 
     const node = document.createElement("div");
     node.dataset.nhccVotingWidget = "";
-    for (const key of ["apiBase", "billTrackerUrl", "title", "buttonText"]) {
+    for (const key of ["apiBase", "partner", "billTrackerUrl", "title", "buttonText"]) {
       if (currentScript.dataset[key]) node.dataset[key] = currentScript.dataset[key];
     }
     currentScript.insertAdjacentElement("beforebegin", node);
@@ -669,7 +692,12 @@ function handleVotingWidgetScript(request) {
         const response = await fetch(config.apiBase.replace(/\\/$/, "") + "/widgets/voting-info/lookup", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ address, billTrackerUrl: config.trackerUrl })
+          body: JSON.stringify({
+            address,
+            partner: config.partner,
+            billTrackerUrl: config.trackerUrl,
+            embedderUrl: document.referrer || window.location.href
+          })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Lookup failed.");
@@ -742,15 +770,19 @@ async function handleVotingWidgetLookup(request, env) {
 
     const body = await request.json();
     const address = String(body.address || "").trim();
-    const billTrackerUrl = String(
-      body.billTrackerUrl || DEFAULT_BILL_TRACKER_URL
-    ).trim();
+    const partner = await resolvePartnerConfig(env, body.partner, true);
+    const requestedBillTrackerUrl = String(body.billTrackerUrl || "").trim();
 
     if (!address) {
       return json({ error: "Address is required." }, 400);
     }
 
-    const trackerUrl = validateBillTrackerUrl(billTrackerUrl);
+    const trackerUrl = resolveWidgetTrackerUrl(
+      partner,
+      requestedBillTrackerUrl || DEFAULT_BILL_TRACKER_URL
+    );
+    validatePartnerWidgetAccess(request, partner, body.embedderUrl);
+
     const [lookupResponse, bills] = await Promise.all([
       handleAddressLookup(
         new Request(request.url, {
@@ -793,18 +825,143 @@ async function handleVotingWidgetLookup(request, env) {
       },
       bills: visibleBills,
       meta: {
+        partner: partner?.id || null,
         billTrackerUrl: trackerUrl,
         billCount: visibleBills.length,
         trackerBillCount: bills.length,
       },
     });
   } catch (error) {
+    const message = error.message || "Unable to load voting information.";
+    const status =
+      message === "Widget partner is required." ||
+      message === "Unknown widget partner." ||
+      message === "Widget partner registration is incomplete." ||
+      message === "This partner is not allowed to use that bill tracker."
+        ? 400
+        : message === "Widget partner is not active." ||
+            message === "This widget partner is not allowed on this site."
+          ? 403
+          : 500;
+
     return json(
       {
-        error: error.message || "Unable to load voting information.",
+        error: message,
       },
-      500
+      status
     );
+  }
+}
+
+async function resolvePartnerConfig(env, value, required = false) {
+  const partnerId = String(value || "").trim().toLowerCase();
+  if (!partnerId) {
+    if (required) throw new Error("Widget partner is required.");
+    return null;
+  }
+
+  if (!env.CIVIC_COMMONS_DB) {
+    throw new Error("Widget partner registry is not configured.");
+  }
+
+  const result = await env.CIVIC_COMMONS_DB.prepare(`
+    SELECT
+      partner_id,
+      name,
+      allowed_origins,
+      allowed_tracker_urls,
+      active
+    FROM widget_partners
+    WHERE lower(partner_id) = ?
+    LIMIT 1
+  `)
+    .bind(partnerId)
+    .first();
+
+  if (!result) {
+    throw new Error("Unknown widget partner.");
+  }
+
+  if (Number(result.active) !== 1) {
+    throw new Error("Widget partner is not active.");
+  }
+
+  const allowedOrigins = parseJsonStringList(result.allowed_origins);
+  const allowedTrackerUrls = parseJsonStringList(result.allowed_tracker_urls)
+    .map((trackerUrl) => validateBillTrackerUrl(trackerUrl));
+
+  if (!allowedOrigins.length || !allowedTrackerUrls.length) {
+    throw new Error("Widget partner registration is incomplete.");
+  }
+
+  return {
+    id: result.partner_id,
+    name: result.name,
+    allowedOrigins,
+    allowedTrackerUrls,
+  };
+}
+
+function resolveWidgetTrackerUrl(partner, requestedBillTrackerUrl) {
+  const defaultTrackerUrl = partner?.allowedTrackerUrls?.[0] || requestedBillTrackerUrl;
+  const trackerUrl = validateBillTrackerUrl(defaultTrackerUrl);
+
+  if (!partner) return trackerUrl;
+
+  const requestedUrl = requestedBillTrackerUrl
+    ? validateBillTrackerUrl(requestedBillTrackerUrl)
+    : "";
+
+  if (
+    requestedUrl &&
+    requestedUrl !== DEFAULT_BILL_TRACKER_URL &&
+    !partner.allowedTrackerUrls.includes(requestedUrl)
+  ) {
+    throw new Error("This partner is not allowed to use that bill tracker.");
+  }
+
+  return requestedUrl && requestedUrl !== DEFAULT_BILL_TRACKER_URL
+    ? requestedUrl
+    : trackerUrl;
+}
+
+function validatePartnerWidgetAccess(request, partner, embedderUrl) {
+  if (!partner) return;
+
+  const candidates = [
+    request.headers.get("origin"),
+    request.headers.get("referer"),
+    embedderUrl,
+  ];
+
+  if (candidates.some((candidate) => isAllowedPartnerUrl(candidate, partner))) {
+    return;
+  }
+
+  throw new Error("This widget partner is not allowed on this site.");
+}
+
+function isAllowedPartnerUrl(value, partner) {
+  if (!value) return false;
+
+  try {
+    const origin = new URL(value).origin.toLowerCase();
+    return partner.allowedOrigins.includes(origin);
+  } catch {
+    return false;
+  }
+}
+
+function parseJsonStringList(value) {
+  try {
+    const list = JSON.parse(String(value || "[]"));
+    if (!Array.isArray(list)) return [];
+
+    return list
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+  } catch {
+    return [];
   }
 }
 

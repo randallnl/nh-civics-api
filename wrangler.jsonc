@@ -19,6 +19,11 @@
       "binding": "DB",
       "database_name": "nhdb",
       "database_id": "e72f4c03-671f-47d5-8f70-a6792ba8f6c0"
+    },
+    {
+      "binding": "CIVIC_COMMONS_DB",
+      "database_name": "civic_commons",
+      "database_id": "07975d00-e3c9-4d30-96ac-c311ea31b67c"
     }
   ],
   "r2_buckets": [
