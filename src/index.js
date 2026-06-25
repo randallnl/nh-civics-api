@@ -1,7 +1,8 @@
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, x-admin-secret",
+  "Access-Control-Allow-Headers":
+    "Content-Type, Authorization, x-api-key, x-admin-secret",
 };
 
 const DEFAULT_BILL_TRACKER_URL =
@@ -38,6 +39,63 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+async function requireApiKeyForProtectedEndpoint(request, env, url) {
+  if (!isProtectedApiEndpoint(url.pathname)) return null;
+
+  if (!env.API_ACCESS_KEY) {
+    return json({ error: "Missing API_ACCESS_KEY secret." }, 500);
+  }
+
+  const providedKey = getRequestApiKey(request);
+  if (!providedKey) {
+    return json({ error: "API key is required." }, 401);
+  }
+
+  if (!(await timingSafeEqualString(providedKey, env.API_ACCESS_KEY))) {
+    return json({ error: "Invalid API key." }, 403);
+  }
+
+  return null;
+}
+
+function isProtectedApiEndpoint(pathname) {
+  if (pathname === "/articles" || pathname.startsWith("/articles/")) return true;
+  if (pathname === "/communities" || pathname.startsWith("/communities/")) return true;
+  if (pathname === "/candidates" || pathname.startsWith("/candidates/")) return true;
+  if (pathname === "/bills" || pathname.startsWith("/bills/")) return true;
+  if (pathname === "/reps/search") return true;
+  if (pathname === "/reps/lookup" || pathname === "/reps/lookup-address") return true;
+  if (pathname.startsWith("/reps/")) return true;
+
+  return false;
+}
+
+function getRequestApiKey(request) {
+  const headerKey = request.headers.get("x-api-key");
+  if (headerKey) return headerKey.trim();
+
+  const authorization = request.headers.get("authorization") || "";
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : "";
+}
+
+async function timingSafeEqualString(actual, expected) {
+  const encoder = new TextEncoder();
+  const [actualHash, expectedHash] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(String(actual))),
+    crypto.subtle.digest("SHA-256", encoder.encode(String(expected))),
+  ]);
+  const actualBytes = new Uint8Array(actualHash);
+  const expectedBytes = new Uint8Array(expectedHash);
+  let diff = actualBytes.length ^ expectedBytes.length;
+
+  for (let index = 0; index < actualBytes.length; index += 1) {
+    diff |= actualBytes[index] ^ expectedBytes[index];
+  }
+
+  return diff === 0;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -48,6 +106,13 @@ export default {
         headers: corsHeaders,
       });
     }
+
+    const authError = await requireApiKeyForProtectedEndpoint(
+      request,
+      env,
+      url
+    );
+    if (authError) return authError;
 
     if (url.pathname === "/") {
       return json({

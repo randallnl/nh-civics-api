@@ -111,9 +111,22 @@ The Worker route is configured as a custom domain for `api.nhciviccommons.com`.
 Set these secrets in Cloudflare:
 
 ```sh
+npx wrangler secret put API_ACCESS_KEY
 npx wrangler secret put CIVIC_API_KEY
 npx wrangler secret put ADMIN_SECRET
 ```
+
+Direct API requests to protected endpoints must send either `x-api-key` or a
+Bearer token:
+
+```sh
+curl "https://api.nhciviccommons.com/communities" \
+  -H "x-api-key: $API_ACCESS_KEY"
+```
+
+Protected direct API paths include `/articles`, `/communities`, `/candidates`,
+`/bills`, and `/reps`. Partner widget lookup is protected separately through
+`CIVIC_COMMONS_DB.widget_partners`.
 
 ## Connect to the existing Cloudflare Worker
 
