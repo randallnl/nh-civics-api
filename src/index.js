@@ -419,6 +419,13 @@ function handleVotingWidgetScript(request) {
     return getTone(item.interpretation);
   }
 
+  function formatVoteLabel(value) {
+    const stance = normalizeVoteStance(value);
+    if (stance === "yea") return "Yea";
+    if (stance === "nay") return "Nay";
+    return String(value || "No recorded vote");
+  }
+
   function getPartyLabel(party) {
     const value = String(party || "").trim();
     const lower = value.toLowerCase();
@@ -501,18 +508,20 @@ function handleVotingWidgetScript(request) {
     }
 
     return \`<div class="nhcc-vote-tags">\${votes.map((item) => {
-      const vote = item.vote ? escapeHtml(item.vote.vote) : "No recorded vote";
+      const vote = item.vote ? formatVoteLabel(item.vote.vote) : "No recorded vote";
       const tone = getVoteTone(item);
       const billLabel = item.bill.name || item.bill.code;
+      const voteChoice = item.interpretation ? \`\${item.interpretation}(\${vote})\` : vote;
       return \`<button
         type="button"
         class="nhcc-vote-tag"
         data-bill-code="\${escapeHtml(item.bill.code)}"
+        data-vote-impact="\${escapeHtml(item.voteImpact || "")}"
+        data-vote-label="\${escapeHtml(voteChoice)}"
         data-tone="\${escapeHtml(tone)}"
       >
         <strong>\${escapeHtml(billLabel)}</strong>
-        <span class="nhcc-vote-choice">\${vote}</span>
-        \${item.interpretation ? \`<em>\${escapeHtml(item.interpretation)}</em>\` : ""}
+        <span class="nhcc-vote-choice">\${escapeHtml(voteChoice)}</span>
       </button>\`;
     }).join("")}</div>\`;
   }
@@ -606,13 +615,17 @@ function handleVotingWidgetScript(request) {
     renderRepCard(root, "");
   }
 
-  function billDialog(bill) {
+  function billDialog(bill, voteImpact, voteLabel) {
     return \`<div class="nhcc-dialog-backdrop" data-dialog-backdrop>
       <section class="nhcc-dialog" role="dialog" aria-modal="true" aria-labelledby="nhcc-dialog-title">
         <button type="button" class="nhcc-dialog__close" data-dialog-close aria-label="Close">×</button>
         <p class="nhcc-dialog__eyebrow">\${escapeHtml(bill.code)} · \${escapeHtml(bill.issueArea || "Tracked bill")}</p>
         <h3 id="nhcc-dialog-title">\${escapeHtml(bill.name || bill.code)}</h3>
         \${bill.summary ? \`<p>\${escapeHtml(bill.summary)}</p>\` : ""}
+        \${voteImpact ? \`<div class="nhcc-selected-impact">
+          <strong>\${escapeHtml(voteLabel || "Selected vote")}</strong>
+          <p>\${escapeHtml(voteImpact)}</p>
+        </div>\` : ""}
         \${bill.moreInfoUrl ? \`<p><a href="\${escapeHtml(bill.moreInfoUrl)}" target="_blank" rel="noopener">More information</a></p>\` : ""}
         <div class="nhcc-impact-grid">
           <div>
@@ -630,14 +643,14 @@ function handleVotingWidgetScript(request) {
     </div>\`;
   }
 
-  function openBillDialog(root, billCode) {
+  function openBillDialog(root, billCode, voteImpact, voteLabel) {
     const bill = (root.__nhccBills || []).find((item) => item.code === billCode);
     if (!bill) return;
 
     const existing = root.querySelector("[data-dialog-backdrop]");
     if (existing) existing.remove();
 
-    root.querySelector(".nhcc-widget").insertAdjacentHTML("beforeend", billDialog(bill));
+    root.querySelector(".nhcc-widget").insertAdjacentHTML("beforeend", billDialog(bill, voteImpact, voteLabel));
     root.querySelector("[data-dialog-close]")?.focus();
   }
 
@@ -705,7 +718,7 @@ function handleVotingWidgetScript(request) {
         .nhcc-vote-tags { display: flex; flex-wrap: wrap; gap: 8px; }
         .nhcc-vote-tag { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 5px; max-width: 100%; border: 1px solid #e1e7ef; border-radius: 10px; padding: 8px 10px; background: #fff; color: #18212f; cursor: pointer; text-align: left; font: inherit; font-size: .78rem; }
         .nhcc-vote-tag strong { color: #174ea6; overflow-wrap: anywhere; }
-        .nhcc-vote-choice { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 9px; background: #18212f; color: #fff; font-size: .82rem; font-weight: 900; line-height: 1.1; text-transform: uppercase; }
+        .nhcc-vote-choice { display: inline-flex; align-items: center; max-width: 100%; border-radius: 999px; padding: 4px 9px; background: #18212f; color: #fff; font-size: .82rem; font-weight: 900; line-height: 1.1; overflow-wrap: anywhere; }
         .nhcc-vote-tag em { color: #18212f; font-style: normal; font-weight: 800; }
         .nhcc-vote-tag[data-tone="pro"] { background: #ecfdf3; border-color: #bbf7d0; color: #166534; }
         .nhcc-vote-tag[data-tone="anti"] { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
@@ -726,6 +739,9 @@ function handleVotingWidgetScript(request) {
         .nhcc-dialog a { color: #174ea6; font-weight: 700; }
         .nhcc-dialog__eyebrow { margin: 0 32px 6px 0; color: #526173 !important; font-size: .86rem; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; }
         .nhcc-dialog__close { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border: 1px solid #d7dee8; border-radius: 50%; background: #fff; color: #18212f; font-size: 1.35rem; line-height: 1; cursor: pointer; }
+        .nhcc-selected-impact { margin: 14px 0; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px; background: #ecfdf3; color: #166534; }
+        .nhcc-selected-impact strong { display: block; margin-bottom: 4px; }
+        .nhcc-selected-impact p { color: #166534; margin: 0; font-size: .94rem; }
         .nhcc-impact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
         .nhcc-impact-grid div { border: 1px solid #e1e7ef; border-radius: 8px; padding: 12px; }
         .nhcc-impact-grid strong { display: block; margin-bottom: 4px; }
@@ -811,7 +827,12 @@ function handleVotingWidgetScript(request) {
 
       const billButton = event.target.closest?.("[data-bill-code]");
       if (billButton) {
-        openBillDialog(root, billButton.dataset.billCode);
+        openBillDialog(
+          root,
+          billButton.dataset.billCode,
+          billButton.dataset.voteImpact || "",
+          billButton.dataset.voteLabel || ""
+        );
         return;
       }
 
@@ -1228,6 +1249,7 @@ async function attachTrackedBillVotes(env, representatives, bills) {
             bill,
             vote,
             interpretation: getVoteInterpretation(bill, vote),
+            voteImpact: getVoteImpact(bill, vote),
           };
         })
         .filter(Boolean),
@@ -1248,6 +1270,20 @@ function getVoteInterpretation(bill, vote) {
 
   if (vote.vote === "nay") {
     return bill.nayInterpretation || "";
+  }
+
+  return "";
+}
+
+function getVoteImpact(bill, vote) {
+  if (!vote) return "";
+
+  if (vote.vote === "yea") {
+    return bill.yeaImpact || "";
+  }
+
+  if (vote.vote === "nay") {
+    return bill.nayImpact || "";
   }
 
   return "";
