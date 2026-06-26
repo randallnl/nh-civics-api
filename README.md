@@ -83,11 +83,13 @@ Iframe embed:
 Script embed:
 
 ```html
-<script
-  src="https://api.nhciviccommons.com/widgets/voting-info.js"
+<div
   data-nhcc-voting-widget
   data-partner="queerlective"
-></script>
+></div>
+<script
+  src="https://api.nhciviccommons.com/widgets/voting-info.js">
+</script>
 ```
 
 Optional data attributes:

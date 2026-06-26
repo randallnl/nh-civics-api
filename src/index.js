@@ -393,7 +393,7 @@ function handleVotingWidgetScript(request) {
   }
 
   function ensureContainer() {
-    if (document.querySelector("[data-nhcc-voting-widget]")) return;
+    if (document.querySelector("[data-nhcc-voting-widget]:not(script)")) return;
     if (!currentScript?.hasAttribute("data-nhcc-voting-widget") && !currentScript?.dataset.billTrackerUrl) return;
 
     const node = document.createElement("div");
@@ -925,7 +925,7 @@ function handleVotingWidgetScript(request) {
 
   function mountAll() {
     ensureContainer();
-    document.querySelectorAll("[data-nhcc-voting-widget]").forEach(mount);
+    document.querySelectorAll("[data-nhcc-voting-widget]:not(script)").forEach(mount);
   }
 
   function observeMounts() {
