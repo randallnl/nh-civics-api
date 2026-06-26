@@ -461,16 +461,12 @@ function handleVotingWidgetScript(request) {
     return name.slice(code.length).replace(/^\\s*:?\\s*/, "") || name;
   }
 
-  function renderExpandedBillInfo(item, voteChoice) {
+  function renderExpandedBillInfo(item) {
     const bill = item.bill || {};
     return \`<div class="nhcc-bill-expanded">
       \${bill.summary ? \`<section class="nhcc-bill-summary">
         <strong>Bill summary</strong>
         <p>\${escapeHtml(bill.summary)}</p>
-      </section>\` : ""}
-      \${item.voteImpact ? \`<section class="nhcc-selected-impact nhcc-selected-impact--inline">
-        <strong>\${escapeHtml(voteChoice || "Selected vote")}</strong>
-        <p>\${escapeHtml(item.voteImpact)}</p>
       </section>\` : ""}
       <div class="nhcc-impact-grid nhcc-impact-grid--compact">
         <div>
@@ -560,10 +556,13 @@ function handleVotingWidgetScript(request) {
         <summary>
           <span class="nhcc-bill-code">\${escapeHtml(item.bill.code)}</span>
           <strong class="nhcc-bill-title">\${escapeHtml(billTitle)}</strong>
-          <span class="nhcc-vote-choice">\${escapeHtml(voteChoice)}</span>
+          <span class="nhcc-vote-row">
+            <span class="nhcc-vote-kicker">Vote</span>
+            <span class="nhcc-vote-choice">\${escapeHtml(voteChoice)}</span>
+          </span>
           \${item.voteImpact ? \`<p class="nhcc-vote-impact">\${escapeHtml(item.voteImpact)}</p>\` : ""}
         </summary>
-        \${renderExpandedBillInfo(item, voteChoice)}
+        \${renderExpandedBillInfo(item)}
       </details>\`;
     }).join("")}</div>\`;
   }
@@ -770,6 +769,8 @@ function handleVotingWidgetScript(request) {
         .nhcc-vote-tag[open] summary::after { content: "Tap to collapse"; }
         .nhcc-bill-code { color: #526173; font-size: .9rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
         .nhcc-bill-title { color: #174ea6; font-size: 1.08rem; line-height: 1.25; overflow-wrap: anywhere; }
+        .nhcc-vote-row { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; }
+        .nhcc-vote-kicker { display: inline-flex; align-items: center; border: 1px solid #cbd5e1; border-radius: 6px; padding: 4px 7px; background: #f8fafc; color: #526173; font-size: .72rem; font-weight: 900; letter-spacing: .06em; line-height: 1.1; text-transform: uppercase; }
         .nhcc-vote-choice { display: inline-flex; align-items: center; max-width: 100%; border-radius: 999px; padding: 4px 9px; background: #18212f; color: #fff; font-size: .82rem; font-weight: 900; line-height: 1.1; overflow-wrap: anywhere; }
         .nhcc-vote-impact { max-width: 34rem; color: #344255; font-size: .82rem; line-height: 1.35; }
         .nhcc-bill-expanded { display: grid; gap: 12px; padding: 12px; border-top: 1px solid rgba(148, 163, 184, .35); background: #f8fafc; }
