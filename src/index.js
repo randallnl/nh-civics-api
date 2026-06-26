@@ -712,7 +712,7 @@ function handleVotingWidgetScript(request) {
         .nhcc-party-pill--other { background: #f3f4f6; border-color: #e5e7eb; color: #374151; }
         .nhcc-grade { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; margin: 10px 0; padding: 10px; border-radius: 12px; border: 1px solid #e1e7ef; background: #f9fafb; }
         .nhcc-grade span { color: #526173; font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-        .nhcc-grade strong { border-radius: 999px; padding: 6px 10px; background: #edf1f6; font-size: 1.15rem; }
+        .nhcc-grade strong { display: inline-grid; place-items: center; min-width: 64px; min-height: 56px; border-radius: 16px; padding: 6px 12px; background: #edf1f6; font-size: 2.35rem; line-height: 1; }
         .nhcc-grade strong[data-grade="A"], .nhcc-grade strong[data-grade="B"] { background: #dcfce7; color: #166534; }
         .nhcc-grade strong[data-grade="C"] { background: #fef9c3; color: #854d0e; }
         .nhcc-grade strong[data-grade="D"] { background: #ffedd5; color: #9a3412; }
