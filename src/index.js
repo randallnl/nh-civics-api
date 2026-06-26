@@ -416,7 +416,7 @@ function handleVotingWidgetScript(request) {
       return preferredStance === vote ? "aligned" : "not-aligned";
     }
 
-    return getTone(item.interpretation);
+    return "neutral";
   }
 
   function formatVoteLabel(value) {
@@ -522,6 +522,7 @@ function handleVotingWidgetScript(request) {
       >
         <strong>\${escapeHtml(billLabel)}</strong>
         <span class="nhcc-vote-choice">\${escapeHtml(voteChoice)}</span>
+        \${item.voteImpact ? \`<p class="nhcc-vote-impact">\${escapeHtml(item.voteImpact)}</p>\` : ""}
       </button>\`;
     }).join("")}</div>\`;
   }
@@ -719,21 +720,27 @@ function handleVotingWidgetScript(request) {
         .nhcc-vote-tag { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 5px; max-width: 100%; border: 1px solid #e1e7ef; border-radius: 10px; padding: 8px 10px; background: #fff; color: #18212f; cursor: pointer; text-align: left; font: inherit; font-size: .78rem; }
         .nhcc-vote-tag strong { color: #174ea6; overflow-wrap: anywhere; }
         .nhcc-vote-choice { display: inline-flex; align-items: center; max-width: 100%; border-radius: 999px; padding: 4px 9px; background: #18212f; color: #fff; font-size: .82rem; font-weight: 900; line-height: 1.1; overflow-wrap: anywhere; }
+        .nhcc-vote-impact { max-width: 34rem; color: #344255; font-size: .82rem; line-height: 1.35; }
         .nhcc-vote-tag em { color: #18212f; font-style: normal; font-weight: 800; }
         .nhcc-vote-tag[data-tone="pro"] { background: #ecfdf3; border-color: #bbf7d0; color: #166534; }
         .nhcc-vote-tag[data-tone="anti"] { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
         .nhcc-vote-tag[data-tone="aligned"] { background: #ecfdf3; border-color: #86efac; color: #166534; }
-        .nhcc-vote-tag[data-tone="not-aligned"] { background: #f8fafc; border-color: #cbd5e1; color: #334155; }
+        .nhcc-vote-tag[data-tone="not-aligned"] { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+        .nhcc-vote-tag[data-tone="neutral"] { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
         .nhcc-vote-tag[data-tone="pro"] .nhcc-vote-choice { background: #166534; }
         .nhcc-vote-tag[data-tone="anti"] .nhcc-vote-choice { background: #991b1b; }
         .nhcc-vote-tag[data-tone="aligned"] .nhcc-vote-choice { background: #166534; }
-        .nhcc-vote-tag[data-tone="not-aligned"] .nhcc-vote-choice { background: #475569; }
+        .nhcc-vote-tag[data-tone="not-aligned"] .nhcc-vote-choice { background: #991b1b; }
+        .nhcc-vote-tag[data-tone="neutral"] .nhcc-vote-choice { background: #1d4ed8; }
+        .nhcc-vote-tag[data-tone="aligned"] .nhcc-vote-impact { color: #166534; }
+        .nhcc-vote-tag[data-tone="not-aligned"] .nhcc-vote-impact { color: #991b1b; }
+        .nhcc-vote-tag[data-tone="neutral"] .nhcc-vote-impact { color: #1d4ed8; }
         .nhcc-empty { color: #526173; font-size: .92rem; }
         .nhcc-vote { border-radius: 999px; padding: 4px 8px; background: #edf1f6; color: #344255; font-size: .82rem; white-space: nowrap; }
         .nhcc-vote--yea { background: #e7f5ee; color: #146c43; }
         .nhcc-vote--nay { background: #fdecec; color: #b42318; }
-        .nhcc-dialog-backdrop { position: fixed; inset: 0; z-index: 2147483000; display: grid; place-items: center; padding: 16px; background: rgba(24, 33, 47, .46); }
-        .nhcc-dialog { position: relative; width: min(680px, 100%); max-height: min(760px, calc(100vh - 32px)); overflow: auto; border-radius: 8px; background: #fff; padding: 18px; box-shadow: 0 20px 70px rgba(24, 33, 47, .32); }
+        .nhcc-dialog-backdrop { position: fixed; inset: 0; z-index: 2147483000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(24, 33, 47, .46); }
+        .nhcc-dialog { position: relative; width: min(680px, 100%); max-height: min(760px, calc(100vh - 32px)); margin: auto; overflow: auto; border-radius: 8px; background: #fff; padding: 18px; box-shadow: 0 20px 70px rgba(24, 33, 47, .32); }
         .nhcc-dialog h3 { margin: 0 32px 10px 0; font-size: 1.2rem; line-height: 1.25; }
         .nhcc-dialog p { color: #344255; line-height: 1.45; }
         .nhcc-dialog a { color: #174ea6; font-weight: 700; }
