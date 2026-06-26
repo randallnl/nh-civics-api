@@ -401,6 +401,24 @@ function handleVotingWidgetScript(request) {
     return "mix";
   }
 
+  function normalizeVoteStance(value) {
+    const lower = String(value || "").trim().toLowerCase();
+    if (lower === "yea" || lower === "yes" || lower === "y") return "yea";
+    if (lower === "nay" || lower === "no" || lower === "n") return "nay";
+    return "";
+  }
+
+  function getVoteTone(item) {
+    const preferredStance = normalizeVoteStance(item.bill?.preferredStance);
+    const vote = normalizeVoteStance(item.vote?.vote);
+
+    if (preferredStance && vote) {
+      return preferredStance === vote ? "aligned" : "not-aligned";
+    }
+
+    return getTone(item.interpretation);
+  }
+
   function getPartyLabel(party) {
     const value = String(party || "").trim();
     const lower = value.toLowerCase();
@@ -484,7 +502,7 @@ function handleVotingWidgetScript(request) {
 
     return \`<div class="nhcc-vote-tags">\${votes.map((item) => {
       const vote = item.vote ? escapeHtml(item.vote.vote) : "No recorded vote";
-      const tone = getTone(item.interpretation);
+      const tone = getVoteTone(item);
       const billLabel = item.bill.name || item.bill.code;
       return \`<button
         type="button"
@@ -691,8 +709,12 @@ function handleVotingWidgetScript(request) {
         .nhcc-vote-tag em { color: #18212f; font-style: normal; font-weight: 800; }
         .nhcc-vote-tag[data-tone="pro"] { background: #ecfdf3; border-color: #bbf7d0; color: #166534; }
         .nhcc-vote-tag[data-tone="anti"] { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+        .nhcc-vote-tag[data-tone="aligned"] { background: #ecfdf3; border-color: #86efac; color: #166534; }
+        .nhcc-vote-tag[data-tone="not-aligned"] { background: #f8fafc; border-color: #cbd5e1; color: #334155; }
         .nhcc-vote-tag[data-tone="pro"] .nhcc-vote-choice { background: #166534; }
         .nhcc-vote-tag[data-tone="anti"] .nhcc-vote-choice { background: #991b1b; }
+        .nhcc-vote-tag[data-tone="aligned"] .nhcc-vote-choice { background: #166534; }
+        .nhcc-vote-tag[data-tone="not-aligned"] .nhcc-vote-choice { background: #475569; }
         .nhcc-empty { color: #526173; font-size: .92rem; }
         .nhcc-vote { border-radius: 999px; padding: 4px 8px; background: #edf1f6; color: #344255; font-size: .82rem; white-space: nowrap; }
         .nhcc-vote--yea { background: #e7f5ee; color: #146c43; }
@@ -1076,6 +1098,14 @@ function parseBillTrackerCsv(csvText) {
         moreInfoUrl: record.MoreInfoURL || "",
         issueArea: record["Issue Area"] || "",
         articles: record.Articles || "",
+        preferredStance: normalizePreferredStance(
+          getRecordValue(record, [
+            "Preferred Stance",
+            "PreferredStance",
+            "Preferred Vote",
+            "PreferredVote",
+          ])
+        ),
         yeaInterpretation: record["Yea Interpretation"] || "",
         nayInterpretation: record["Nay Interpretation"] || "",
         yeaImpact: record["Yea Impact"] || "",
@@ -1117,6 +1147,13 @@ function normalizeVoteSequence(value) {
 
   const number = Number(text);
   return Number.isFinite(number) ? String(Math.trunc(number)) : text;
+}
+
+function normalizePreferredStance(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (["yea", "yes", "y"].includes(text)) return "yea";
+  if (["nay", "no", "n"].includes(text)) return "nay";
+  return "";
 }
 
 function parseCsv(text) {
