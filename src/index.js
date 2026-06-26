@@ -325,7 +325,7 @@ async function handleVotingWidgetPage(request, env) {
   <title>${escapeHtml(title)}</title>
   <style>
     html, body { margin: 0; padding: 0; background: transparent; }
-    html, body { min-height: 1200px; overflow-y: auto; }
+    body { overflow: hidden; }
     [data-nhcc-voting-widget] { display: block; }
   </style>
 </head>
@@ -341,14 +341,24 @@ async function handleVotingWidgetPage(request, env) {
   <script>
     (() => {
       const notifyHeight = () => {
-        const height = Math.ceil(document.documentElement.scrollHeight || document.body.scrollHeight || 0);
+        const height = Math.ceil(Math.max(
+          document.documentElement.scrollHeight || 0,
+          document.documentElement.offsetHeight || 0,
+          document.body?.scrollHeight || 0,
+          document.body?.offsetHeight || 0
+        ));
         window.parent?.postMessage({ type: "nhcc:voting-widget:height", height }, "*");
       };
       if ("ResizeObserver" in window) {
         new ResizeObserver(notifyHeight).observe(document.body);
+        new ResizeObserver(notifyHeight).observe(document.documentElement);
       }
       window.addEventListener("load", notifyHeight);
+      window.addEventListener("resize", notifyHeight);
+      document.addEventListener("toggle", notifyHeight, true);
+      document.addEventListener("click", () => setTimeout(notifyHeight, 80), true);
       setTimeout(notifyHeight, 250);
+      setTimeout(notifyHeight, 1000);
     })();
   </script>
 </body>

@@ -74,10 +74,23 @@ Iframe embed:
 
 ```html
 <iframe
+  id="nhcc-voting-widget"
   src="https://api.nhciviccommons.com/widgets/voting-info?partner=queerlective"
-  style="width: 100%; height: 1200px; border: 0;"
+  style="width: 100%; min-height: 520px; border: 0; overflow: hidden;"
   loading="lazy"
+  scrolling="no"
 ></iframe>
+<script>
+  (() => {
+    const frame = document.getElementById("nhcc-voting-widget");
+    window.addEventListener("message", (event) => {
+      if (event.origin !== "https://api.nhciviccommons.com") return;
+      if (event.data?.type !== "nhcc:voting-widget:height") return;
+      const height = Math.max(520, Math.ceil(Number(event.data.height) || 0));
+      frame.style.height = `${height}px`;
+    });
+  })();
+</script>
 ```
 
 Script embed:
