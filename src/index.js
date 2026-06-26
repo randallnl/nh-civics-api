@@ -464,21 +464,24 @@ function handleVotingWidgetScript(request) {
   function renderExpandedBillInfo(item, voteChoice) {
     const bill = item.bill || {};
     return \`<div class="nhcc-bill-expanded">
-      \${bill.summary ? \`<p>\${escapeHtml(bill.summary)}</p>\` : ""}
-      \${item.voteImpact ? \`<div class="nhcc-selected-impact nhcc-selected-impact--inline">
+      \${bill.summary ? \`<section class="nhcc-bill-summary">
+        <strong>Bill summary</strong>
+        <p>\${escapeHtml(bill.summary)}</p>
+      </section>\` : ""}
+      \${item.voteImpact ? \`<section class="nhcc-selected-impact nhcc-selected-impact--inline">
         <strong>\${escapeHtml(voteChoice || "Selected vote")}</strong>
         <p>\${escapeHtml(item.voteImpact)}</p>
-      </div>\` : ""}
+      </section>\` : ""}
       <div class="nhcc-impact-grid nhcc-impact-grid--compact">
         <div>
           <strong>Yea</strong>
-          \${bill.yeaInterpretation ? \`<span>\${escapeHtml(bill.yeaInterpretation)}</span>\` : ""}
-          \${bill.yeaImpact ? \`<p>\${escapeHtml(bill.yeaImpact)}</p>\` : ""}
+          \${bill.yeaInterpretation ? \`<span>Interpretation</span><p>\${escapeHtml(bill.yeaInterpretation)}</p>\` : ""}
+          \${bill.yeaImpact ? \`<span>Impact</span><p>\${escapeHtml(bill.yeaImpact)}</p>\` : ""}
         </div>
         <div>
           <strong>Nay</strong>
-          \${bill.nayInterpretation ? \`<span>\${escapeHtml(bill.nayInterpretation)}</span>\` : ""}
-          \${bill.nayImpact ? \`<p>\${escapeHtml(bill.nayImpact)}</p>\` : ""}
+          \${bill.nayInterpretation ? \`<span>Interpretation</span><p>\${escapeHtml(bill.nayInterpretation)}</p>\` : ""}
+          \${bill.nayImpact ? \`<span>Impact</span><p>\${escapeHtml(bill.nayImpact)}</p>\` : ""}
         </div>
       </div>
       \${bill.moreInfoUrl ? \`<p><a href="\${escapeHtml(bill.moreInfoUrl)}" target="_blank" rel="noopener">More information</a></p>\` : ""}
@@ -769,10 +772,12 @@ function handleVotingWidgetScript(request) {
         .nhcc-bill-title { color: #174ea6; font-size: 1.08rem; line-height: 1.25; overflow-wrap: anywhere; }
         .nhcc-vote-choice { display: inline-flex; align-items: center; max-width: 100%; border-radius: 999px; padding: 4px 9px; background: #18212f; color: #fff; font-size: .82rem; font-weight: 900; line-height: 1.1; overflow-wrap: anywhere; }
         .nhcc-vote-impact { max-width: 34rem; color: #344255; font-size: .82rem; line-height: 1.35; }
-        .nhcc-bill-expanded { display: grid; gap: 10px; padding: 0 12px 12px; border-top: 1px solid rgba(148, 163, 184, .35); }
-        .nhcc-bill-expanded > p:first-child { padding-top: 10px; }
-        .nhcc-bill-expanded p { color: #344255; line-height: 1.45; }
+        .nhcc-bill-expanded { display: grid; gap: 12px; padding: 12px; border-top: 1px solid rgba(148, 163, 184, .35); background: #f8fafc; }
+        .nhcc-bill-expanded p { color: #344255; line-height: 1.48; }
         .nhcc-bill-expanded a { color: #174ea6; font-weight: 700; }
+        .nhcc-bill-summary { border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; background: #fff; }
+        .nhcc-bill-summary strong { display: block; margin-bottom: 6px; color: #18212f; font-size: .82rem; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }
+        .nhcc-bill-summary p { font-size: 1rem; line-height: 1.52; }
         .nhcc-vote-tag em { color: #18212f; font-style: normal; font-weight: 800; }
         .nhcc-vote-tag[data-tone="pro"] { background: #ecfdf3; border-color: #bbf7d0; color: #166534; }
         .nhcc-vote-tag[data-tone="anti"] { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
@@ -798,15 +803,16 @@ function handleVotingWidgetScript(request) {
         .nhcc-dialog a { color: #174ea6; font-weight: 700; }
         .nhcc-dialog__eyebrow { margin: 0 32px 6px 0; color: #526173 !important; font-size: .86rem; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; }
         .nhcc-dialog__close { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border: 1px solid #d7dee8; border-radius: 50%; background: #fff; color: #18212f; font-size: 1.35rem; line-height: 1; cursor: pointer; }
-        .nhcc-selected-impact { margin: 14px 0; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px; background: #ecfdf3; color: #166534; }
+        .nhcc-selected-impact { margin: 14px 0; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; background: #f1f5f9; color: #334155; }
+        .nhcc-selected-impact--inline { margin: 0; background: #eef2ff; border-color: #c7d2fe; color: #3730a3; }
         .nhcc-selected-impact strong { display: block; margin-bottom: 4px; }
-        .nhcc-selected-impact p { color: #166534; margin: 0; font-size: .94rem; }
+        .nhcc-selected-impact p { color: inherit; margin: 0; font-size: .94rem; }
         .nhcc-impact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
         .nhcc-impact-grid--compact { margin-top: 0; }
-        .nhcc-impact-grid div { border: 1px solid #e1e7ef; border-radius: 8px; padding: 12px; }
-        .nhcc-impact-grid strong { display: block; margin-bottom: 4px; }
-        .nhcc-impact-grid span { display: block; color: #18212f; font-weight: 800; }
-        .nhcc-impact-grid p { margin: 8px 0 0; font-size: .92rem; }
+        .nhcc-impact-grid div { border: 1px solid #e1e7ef; border-radius: 8px; padding: 12px; background: #fff; }
+        .nhcc-impact-grid strong { display: block; margin-bottom: 8px; color: #18212f; font-size: 1rem; }
+        .nhcc-impact-grid span { display: block; margin-top: 10px; color: #526173; font-size: .72rem; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }
+        .nhcc-impact-grid p { margin: 4px 0 0; font-size: .92rem; }
         @media (max-width: 560px) { .nhcc-form { flex-direction: column; } .nhcc-votes li { grid-template-columns: 1fr; } }
         @media (max-width: 560px) { .nhcc-impact-grid { grid-template-columns: 1fr; } }
       </style>
