@@ -459,21 +459,24 @@ function handleVotingWidgetScript(request) {
   }
 
   function calcGradeStats(votes) {
-    let pro = 0;
-    let anti = 0;
+    let aligned = 0;
+    let notAligned = 0;
 
     for (const item of votes || []) {
-      const tone = getTone(item.interpretation);
-      if (tone === "pro") pro += 1;
-      if (tone === "anti") anti += 1;
+      const preferredStance = normalizeVoteStance(item.bill?.preferredStance);
+      const vote = normalizeVoteStance(item.vote?.vote);
+
+      if (!preferredStance || !vote) continue;
+      if (preferredStance === vote) aligned += 1;
+      else notAligned += 1;
     }
 
-    const counted = pro + anti;
-    const pct = counted ? Math.round((pro / counted) * 100) : 0;
+    const counted = aligned + notAligned;
+    const pct = counted ? Math.round((aligned / counted) * 100) : 0;
 
     return {
-      pro,
-      anti,
+      aligned,
+      notAligned,
       counted,
       pct,
       letter: counted ? percentToLetter(pct) : "—"
@@ -563,7 +566,7 @@ function handleVotingWidgetScript(request) {
       <div class="nhcc-grade">
         <span>Alignment grade\${issue ? " · " + escapeHtml(issue) : ""}</span>
         <strong data-grade="\${escapeHtml(stats.letter)}">\${escapeHtml(stats.letter)}</strong>
-        <p>\${stats.counted ? escapeHtml(String(stats.pct)) + "% aligned based on " + escapeHtml(String(stats.counted)) + " scored votes" : "Not enough scored votes for this filter"}</p>
+        <p>\${stats.counted ? escapeHtml(String(stats.pct)) + "% aligned with preferred stances across " + escapeHtml(String(stats.counted)) + " votes" : "Not enough preferred stance votes for this filter"}</p>
       </div>
       <div class="nhcc-vote-label">Tap a vote to see what it means.</div>
       \${renderVoteTags(rep, issue)}
