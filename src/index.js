@@ -63,6 +63,7 @@ function isProtectedApiEndpoint(pathname) {
   if (pathname === "/communities" || pathname.startsWith("/communities/")) return true;
   if (pathname === "/candidates" || pathname.startsWith("/candidates/")) return true;
   if (pathname === "/bills" || pathname.startsWith("/bills/")) return true;
+  if (pathname === "/reps") return true;
   if (pathname === "/reps/search") return true;
   if (pathname === "/reps/lookup" || pathname === "/reps/lookup-address") return true;
   if (pathname.startsWith("/reps/")) return true;
@@ -127,6 +128,7 @@ export default {
           "/communities/senate/{district}",
           "/candidates",
           "/candidates/{slug-or-filer-entity-number}",
+          "/reps",
           "/reps/search?town=Manchester",
           "/reps/lookup",
           "/reps/{employeeno}/votes",
@@ -207,6 +209,10 @@ export default {
 
     if (url.pathname.startsWith("/candidates/")) {
       return handleCandidateDetail(request, env);
+    }
+
+    if (url.pathname === "/reps") {
+      return handleReps(request, env);
     }
 
     if (url.pathname.startsWith("/reps/") && url.pathname.endsWith("/votes")) {
@@ -2903,6 +2909,159 @@ async function handleTownSearch(request, env) {
   return json({
     town,
     representatives,
+  });
+}
+
+async function handleReps(request, env) {
+  const url = new URL(request.url);
+  const limit = boundedNumber(url.searchParams.get("limit"), 400, 1, 500);
+  const offset = boundedNumber(url.searchParams.get("offset"), 0, 0, 10000);
+  const body = String(url.searchParams.get("body") || "").trim().toLowerCase();
+  const party = String(url.searchParams.get("party") || "").trim();
+  const q = String(url.searchParams.get("q") || "").trim();
+  const county = String(url.searchParams.get("county") || "").trim();
+  const district = String(url.searchParams.get("district") || "").trim();
+  const where = ["r.active = 1"];
+  const params = [];
+
+  if (body) {
+    if (["house", "h"].includes(body)) {
+      where.push("r.legislativebody = 'H'");
+    } else if (["senate", "s"].includes(body)) {
+      where.push("r.legislativebody = 'S'");
+    } else {
+      return json({ error: "body must be house or senate." }, 400);
+    }
+  }
+
+  if (party) {
+    where.push("LOWER(r.party) = LOWER(?)");
+    params.push(party);
+  }
+
+  if (q) {
+    where.push(`(
+      LOWER(r.firstname || ' ' || r.lastname) LIKE LOWER(?)
+      OR LOWER(r.lastname) LIKE LOWER(?)
+      OR LOWER(COALESCE(dm.communities_represented, r.city, '')) LIKE LOWER(?)
+    )`);
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+  }
+
+  if (county) {
+    where.push(`(
+      LOWER(r.countycode) = LOWER(?)
+      OR LOWER(COALESCE(cc.name, '')) = LOWER(?)
+      OR LOWER(COALESCE(cc.code, '')) = LOWER(?)
+    )`);
+    params.push(county, county, county);
+  }
+
+  if (district) {
+    where.push("CAST(r.district AS TEXT) = CAST(? AS TEXT)");
+    params.push(district);
+  }
+
+  const whereSql = where.join("\n      AND ");
+  const baseFrom = `
+    FROM d1_legislators r
+    LEFT JOIN d1_legislator_photos p
+      ON r.employeeno = p.employeeno
+    LEFT JOIN county_codes cc
+      ON CAST(r.countycode AS INTEGER) = cc.source_county_id
+    LEFT JOIN d1_district_mapping dm
+      ON (
+        (
+          r.legislativebody = 'H'
+          AND dm.body = 'H'
+          AND CAST(r.countycode AS INTEGER) = dm.county
+          AND CAST(r.district AS INTEGER) = dm.district
+        )
+        OR
+        (
+          r.legislativebody = 'S'
+          AND dm.body = 'S'
+          AND CAST(r.district AS INTEGER) = dm.district
+        )
+      )
+    WHERE ${whereSql}
+  `;
+
+  const reps = await env.DB.prepare(`
+    SELECT
+      r.personid AS id,
+      r.personid,
+      r.employeeno,
+      CASE r.legislativebody
+        WHEN 'S' THEN 'Senate'
+        WHEN 'H' THEN 'House'
+        ELSE r.legislativebody
+      END AS chamber,
+      r.legislativebody AS body,
+      r.firstname || ' ' || r.lastname AS name,
+      r.firstname,
+      r.lastname,
+      r.middlename,
+      r.party,
+      ${isFreeStaterSelectExpression("r.is_free_stater")},
+      COALESCE(dm.district_label, r.district) AS district,
+      r.district AS raw_district,
+      r.countycode,
+      COALESCE(cc.name, '') AS county,
+      COALESCE(dm.communities_represented, r.city, '') AS location_text,
+      r.address,
+      r.address2,
+      r.city,
+      r.zipcode,
+      r.emailaddress AS email,
+      '' AS phone,
+      COALESCE(p.photo_url, '') AS photo,
+      r.database_name
+    ${baseFrom}
+    ORDER BY
+      CASE r.legislativebody
+        WHEN 'S' THEN 1
+        WHEN 'H' THEN 2
+        ELSE 3
+      END,
+      CAST(r.countycode AS INTEGER),
+      CAST(r.district AS INTEGER),
+      r.lastname,
+      r.firstname
+    LIMIT ? OFFSET ?
+  `)
+    .bind(...params, limit, offset)
+    .all();
+
+  const totalRow = await env.DB.prepare(`
+    SELECT COUNT(*) AS total
+    ${baseFrom}
+  `)
+    .bind(...params)
+    .first();
+
+  const representatives = reps.results.map((rep) => ({
+    ...rep,
+    sourceUrls: {
+      generalCourt: buildGeneralCourtUrl(rep),
+      photo: rep.photo || null,
+    },
+  }));
+
+  return json({
+    representatives,
+    meta: {
+      total: Number(totalRow?.total || 0),
+      limit,
+      offset,
+      filters: {
+        body: body || null,
+        party: party || null,
+        q: q || null,
+        county: county || null,
+        district: district || null,
+      },
+    },
   });
 }
 

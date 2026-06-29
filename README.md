@@ -54,6 +54,14 @@ npm run dry-run
   - `limit=<1-100>`
   - `offset=<number>`
 - `GET /candidates/{slug-or-filer-entity-number}`: returns one candidate.
+- `GET /reps`: lists active legislators with district, county, contact, photo, source URL, and free-stater fields.
+  - `body=house|senate`
+  - `party=<party>`
+  - `q=<search>`
+  - `county=<county>`
+  - `district=<district>`
+  - `limit=<1-500>`
+  - `offset=<number>`
 - `POST /reps/lookup`: returns civic district matches, representatives, grouped representatives, and matching candidates for the address.
   - `candidateYear=<year>` defaults to `2026`
 - `GET /widgets/voting-info.js`: embeddable partner widget script for address-based voting records.
