@@ -2027,7 +2027,7 @@ function getTownSearchPatterns(normalizedTown) {
 }
 
 function townDistrictMatches(communities, normalizedTown) {
-  return splitCommunityList(communities).some((community) => {
+  return splitDistrictCommunities(communities).some((community) => {
     const normalizedCommunity = normalizeCommunityText(
       getCountyTownName(community)
     );
@@ -3004,6 +3004,7 @@ async function handleReps(request, env) {
       r.middlename,
       r.party,
       ${isFreeStaterSelectExpression("r.is_free_stater")},
+      r.preferred_vote_alignment_pct AS alignment_percent,
       COALESCE(dm.district_label, r.district) AS district,
       r.district AS raw_district,
       r.countycode,
@@ -3093,8 +3094,9 @@ async function handleAddressLookup(request, env) {
     const civicData = await getCivicData(address, env.CIVIC_API_KEY);
     const parsed = parseCivicDivisions(civicData.divisions || {});
 
-    const matchedDistricts = await findDistrictsFromPlace(
+    const matchedDistricts = await findAddressDistricts(
       env,
+      parsed.house,
       parsed.place,
       parsed.ward
     );
@@ -3471,9 +3473,12 @@ function parseCivicDivisions(divisions) {
     }
 
     if (ocdId.includes("/place:") && !place) {
+      const placeMatch = ocdId.match(/\/place:([^/]+)/i);
       place = {
         ocdId,
-        name: name.replace(/\s+(city|town)$/i, "").trim(),
+        name: placeMatch
+          ? formatOcdPlaceName(placeMatch[1])
+          : name.replace(/\s+(city|town)$/i, "").trim(),
       };
     }
 
@@ -3496,6 +3501,14 @@ function parseCivicDivisions(divisions) {
     place,
     ward,
   };
+}
+
+function formatOcdPlaceName(value) {
+  return decodeURIComponent(String(value || ""))
+    .replace(/[_-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function parseHouseDistrict(ocdId, name) {
@@ -3697,6 +3710,57 @@ function buildCommunitySearchTerms(place, ward) {
   return [placeName];
 }
 
+async function findAddressDistricts(env, house, place, ward) {
+  const districts = await findDistrictsFromPlace(env, place, ward);
+
+  if (
+    house?.county &&
+    house?.district &&
+    !districts.some(
+      (district) =>
+        district.body === "H" &&
+        Number(district.county) === Number(house.county) &&
+        Number(district.district) === Number(house.district)
+    )
+  ) {
+    const houseDistrict = await findDistrictMapping(env, "H", house.county, house.district);
+    if (houseDistrict) districts.push(houseDistrict);
+  }
+
+  return dedupeDistrictMappings(districts);
+}
+
+async function findDistrictMapping(env, body, county, district) {
+  const result = await env.DB.prepare(`
+    SELECT
+      body,
+      county,
+      district,
+      district_label,
+      communities_represented
+    FROM d1_district_mapping
+    WHERE body = ?
+      AND county = ?
+      AND district = ?
+    LIMIT 1
+  `)
+    .bind(body, county, district)
+    .first();
+
+  return result || null;
+}
+
+function dedupeDistrictMappings(districts) {
+  const seen = new Set();
+
+  return (districts || []).filter((row) => {
+    const key = `${row.body}_${row.county}_${row.district}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 async function findDistrictsFromPlace(env, place, ward) {
   const placeName = normalizeCommunityText(place?.name || "");
   const wardNumber = ward?.number ? String(ward.number).trim() : "";
@@ -3720,6 +3784,7 @@ async function findDistrictsFromPlace(env, place, ward) {
           OR LOWER(communities_represented) LIKE LOWER(?)
           OR LOWER(communities_represented) LIKE LOWER(?)
           OR LOWER(communities_represented) LIKE LOWER(?)
+          OR LOWER(communities_represented) LIKE LOWER(?)
         )
       ORDER BY
         CASE body
@@ -3735,7 +3800,8 @@ async function findDistrictsFromPlace(env, place, ward) {
         `%ward ${wardNumber}%`,
         `%wards ${wardNumber},%`,
         `%wards ${wardNumber} %`,
-        `% ${wardNumber},%`
+        `% ${wardNumber},%`,
+        `% ${wardNumber}`
       )
       .all();
   } else {
@@ -3761,13 +3827,26 @@ async function findDistrictsFromPlace(env, place, ward) {
       .all();
   }
 
-  const seen = new Set();
+  const matches = wardNumber
+    ? (result.results || []).filter((row) =>
+        districtCommunityMatchesPlaceWard(
+          row.communities_represented,
+          placeName,
+          Number(wardNumber)
+        )
+      )
+    : result.results || [];
 
-  return result.results.filter((row) => {
-    const key = `${row.body}_${row.county}_${row.district}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+  return dedupeDistrictMappings(matches);
+}
+
+function districtCommunityMatchesPlaceWard(communities, placeName, wardNumber) {
+  return splitDistrictCommunities(communities).some((community) => {
+    const town = normalizeCommunityText(getCountyTownName(community));
+    if (town !== placeName) return false;
+
+    const wards = getCommunityWardNumbers(community);
+    return !wards.length || wards.includes(wardNumber);
   });
 }
 

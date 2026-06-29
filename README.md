@@ -54,7 +54,7 @@ npm run dry-run
   - `limit=<1-100>`
   - `offset=<number>`
 - `GET /candidates/{slug-or-filer-entity-number}`: returns one candidate.
-- `GET /reps`: lists active legislators with district, county, contact, photo, source URL, and free-stater fields.
+- `GET /reps`: lists active legislators with district, county, contact, photo, source URL, free-stater, and `alignment_percent` fields.
   - `body=house|senate`
   - `party=<party>`
   - `q=<search>`
